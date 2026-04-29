@@ -1,0 +1,58 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>LED Matrix Image Upload</title>
+</head>
+<body>
+<h1>Upload Pixel Art</h1>
+<input type="file" id="imageInput" accept="image/png,image/jpeg">
+<canvas id="canvas" width="32" height="32"></canvas>
+<button onclick="sendToMatrix()">Send to Matrix</button>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let pixelData = [];
+
+    document.getElementById('imageInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        const img = new Image();
+        img.onload = () => {
+            // Draw and resize to 32x32
+            ctx.drawImage(img, 0, 0, 32, 32);
+
+            // Get pixel data
+            const imageData = ctx.getImageData(0, 0, 32, 32);
+            pixelData = convertToRGB565(imageData);
+        };
+        img.src = URL.createObjectURL(file);
+    });
+
+    function convertToRGB565(imageData) {
+        const data = imageData.data;
+        const rgb565 = [];
+
+        for(let i = 0; i < data.length; i += 4) {
+            const r = data[i] >> 3;      // 5 bits
+            const g = data[i+1] >> 2;    // 6 bits
+            const b = data[i+2] >> 3;    // 5 bits
+            const rgb565Value = (r << 11) | (g << 5) | b;
+            rgb565.push(rgb565Value);
+        }
+        return rgb565;
+    }
+
+    function sendToMatrix() {
+        fetch('/uploadImage', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                width: 32,
+                height: 32,
+                pixels: pixelData
+            })
+        });
+    }
+</script>
+</body>
+</html>
