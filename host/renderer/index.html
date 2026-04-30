@@ -1,0 +1,99 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LED Matrix Control</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+    <!-- Header -->
+    <header>
+        <h1>🎨 LED Matrix Control</h1>
+        <div class="status-bar">
+            <div id="connection-status" class="status disconnected">
+                ⚫ Disconnected
+            </div>
+        </div>
+    </header>
+
+    <!-- Control Panel -->
+    <main>
+        <!-- Connection Section -->
+        <section class="panel">
+            <h2>Connection</h2>
+
+            <div class="control-group">
+                <label for="port-select">Serial Port:</label>
+                <select id="port-select">
+                    <option value="">-- Select Port --</option>
+                </select>
+                <button id="refresh-ports" class="btn-secondary">🔄 Refresh</button>
+            </div>
+
+            <div class="control-group">
+                <button id="connect-btn" class="btn-primary">Connect USB</button>
+                <button id="disconnect-btn" class="btn-danger" disabled>Disconnect</button>
+            </div>
+        </section>
+
+        <!-- Quick Controls Section -->
+        <section class="panel">
+            <h2>Quick Controls</h2>
+
+            <div class="button-grid">
+                <button class="btn-action" data-action="blackout">
+                    ⚫ Blackout (All Off)
+                </button>
+                <button class="btn-action" data-action="white">
+                    ⚪ All White
+                </button>
+                <button class="btn-action" data-action="red">
+                    🔴 All Red
+                </button>
+                <button class="btn-action" data-action="green">
+                    🟢 All Green
+                </button>
+                <button class="btn-action" data-action="blue">
+                    🔵 All Blue
+                </button>
+                <button class="btn-action" data-action="test">
+                    🎨 Test Pattern
+                </button>
+            </div>
+        </section>
+
+        <!-- Matrix Info -->
+        <section class="panel">
+            <h2>Matrix Info</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="label">Resolution:</span>
+                    <span class="value">192 × 32 pixels</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Frame Size:</span>
+                    <span class="value">12,288 bytes</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Color Depth:</span>
+                    <span class="value">RGB565 (65K colors)</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Baud Rate:</span>
+                    <span class="value">2,000,000</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <p>LED Matrix Control v2.0 | USB Streaming Mode</p>
+    </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

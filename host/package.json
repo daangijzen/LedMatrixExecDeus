@@ -1,0 +1,19 @@
+﻿{
+  "name": "led-matrix-control",
+  "version": "2.0.0",
+  "description": "Control software for LED Matrix streaming",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node ControllSoftware.js"
+  },
+  "keywords": ["led", "matrix", "streaming", "usb", "electron"],
+  "author": "Daan Gijzen",
+  "license": "MIT",
+  "dependencies": {
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}
