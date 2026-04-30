@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LED Matrix Control</title>
+    <title>LED Matrix Video Player</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="container">
     <!-- Header -->
     <header>
-        <h1>🎨 LED Matrix Control</h1>
+        <h1>🎬 LED Matrix Video Player</h1>
         <div class="status-bar">
             <div id="connection-status" class="status disconnected">
                 ⚫ Disconnected
@@ -18,80 +18,174 @@
         </div>
     </header>
 
-    <!-- Control Panel -->
-    <main>
-        <!-- Connection Section -->
-        <section class="panel">
-            <h2>Connection</h2>
+    <!-- Main Content -->
+    <main class="video-layout">
 
-            <div class="control-group">
-                <label for="port-select">Serial Port:</label>
-                <select id="port-select">
-                    <option value="">-- Select Port --</option>
-                </select>
-                <button id="refresh-ports" class="btn-secondary">🔄 Refresh</button>
+        <!-- Sidebar: Connection & Settings -->
+        <aside class="sidebar">
+            <!-- Connection -->
+            <section class="panel">
+                <h2>Connection</h2>
+                <div class="control-group">
+                    <select id="port-select">
+                        <option value="">-- Select Port --</option>
+                    </select>
+                    <button id="refresh-ports" class="btn-icon">🔄</button>
+                </div>
+                <div class="control-group">
+                    <button id="connect-btn" class="btn-primary btn-block">Connect</button>
+                    <button id="disconnect-btn" class="btn-danger btn-block" disabled>Disconnect</button>
+                </div>
+            </section>
+
+            <!-- Video Info -->
+            <section class="panel">
+                <h2>Video Info</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="label">File:</span>
+                        <span class="value" id="video-filename">No video loaded</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Resolution:</span>
+                        <span class="value" id="video-resolution">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Duration:</span>
+                        <span class="value" id="video-duration">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">FPS:</span>
+                        <span class="value" id="video-fps">30</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Color Mode -->
+            <section class="panel">
+                <h2>Color Mode</h2>
+                <div class="radio-group">
+                    <label>
+                        <input type="radio" name="colormode" value="4color" checked>
+                        4-Color (R, G, B, W)
+                    </label>
+                    <label>
+                        <input type="radio" name="colormode" value="7color">
+                        7-Color (RGB + mixes)
+                    </label>
+                    <label>
+                        <input type="radio" name="colormode" value="monochrome">
+                        Monochrome (B&W)
+                    </label>
+                    <label>
+                        <input type="radio" name="colormode" value="pwm" disabled>
+                        PWM Dithering (WIP)
+                    </label>
+                </div>
+
+                <div class="control-group" style="margin-top: 15px;">
+                    <label>Brightness Threshold:</label>
+                    <input type="range" id="brightness-threshold" min="0" max="255" value="128">
+                    <span id="threshold-value">128</span>
+                </div>
+            </section>
+
+            <!-- Playback Settings -->
+            <section class="panel">
+                <h2>Playback</h2>
+
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="loop-enabled" checked>
+                        Loop video
+                    </label>
+                </div>
+
+                <div class="control-group">
+                    <label>Playback Speed:</label>
+                    <input type="range" id="playback-speed" min="0.25" max="2" step="0.25" value="1">
+                    <span id="speed-value">1.0x</span>
+                </div>
+            </section>
+
+            <!-- Startup Behavior -->
+            <section class="panel">
+                <h2>Startup</h2>
+                <div class="radio-group">
+                    <label>
+                        <input type="radio" name="startup" value="hold" checked>
+                        Hold first frame
+                    </label>
+                    <label>
+                        <input type="radio" name="startup" value="autoplay">
+                        Auto-play on connect
+                    </label>
+                    <label>
+                        <input type="radio" name="startup" value="black">
+                        Black screen
+                    </label>
+                </div>
+            </section>
+
+            <!-- Quick Actions -->
+            <section class="panel">
+                <h2>Quick Actions</h2>
+                <button id="blackout-btn" class="btn-danger btn-block" disabled>⚫ Blackout</button>
+            </section>
+        </aside>
+
+        <!-- Main Area: Video Player -->
+        <div class="main-content">
+            <!-- Replace .video-container sectie met: -->
+
+            <!-- Video Canvas -->
+            <div class="preview-container">
+                <div class="preview-box">
+                    <h3>Original Colors</h3>
+                    <video id="video-player" crossorigin="anonymous" style="display:none;"></video>
+                    <canvas id="video-canvas-original" width="192" height="32"></canvas>
+                </div>
+
+                <div class="preview-box">
+                    <h3>RGB565 (Matrix Output)</h3>
+                    <canvas id="video-canvas" width="192" height="32"></canvas>
+                </div>
+
+                <div id="no-video-message">
+                    <p>📂 No video loaded</p>
+                    <p><small>Click "Load Video" to get started</small></p>
+                </div>
             </div>
 
-            <div class="control-group">
-                <button id="connect-btn" class="btn-primary">Connect USB</button>
-                <button id="disconnect-btn" class="btn-danger" disabled>Disconnect</button>
+            <!-- Controls -->
+            <div class="controls-panel">
+                <button id="load-video-btn" class="btn-primary">📂 Load Video</button>
+
+                <div class="playback-controls">
+                    <button id="play-btn" class="btn-control" disabled>▶️ Play</button>
+                    <button id="pause-btn" class="btn-control" disabled>⏸️ Pause</button>
+                    <button id="stop-btn" class="btn-control" disabled>⏹️ Stop</button>
+                </div>
+
+                <button id="stream-btn" class="btn-success" disabled>🚀 Stream to Matrix</button>
             </div>
-        </section>
 
-        <!-- Quick Controls Section -->
-        <section class="panel">
-            <h2>Quick Controls</h2>
-
-            <div class="button-grid">
-                <button class="btn-action" data-action="blackout">
-                    ⚫ Blackout (All Off)
-                </button>
-                <button class="btn-action" data-action="white">
-                    ⚪ All White
-                </button>
-                <button class="btn-action" data-action="red">
-                    🔴 All Red
-                </button>
-                <button class="btn-action" data-action="green">
-                    🟢 All Green
-                </button>
-                <button class="btn-action" data-action="blue">
-                    🔵 All Blue
-                </button>
-                <button class="btn-action" data-action="test">
-                    🎨 Test Pattern
-                </button>
-            </div>
-        </section>
-
-        <!-- Matrix Info -->
-        <section class="panel">
-            <h2>Matrix Info</h2>
-            <div class="info-grid">
-                <div class="info-item">
-                    <span class="label">Resolution:</span>
-                    <span class="value">192 × 32 pixels</span>
-                </div>
-                <div class="info-item">
-                    <span class="label">Frame Size:</span>
-                    <span class="value">12,288 bytes</span>
-                </div>
-                <div class="info-item">
-                    <span class="label">Color Depth:</span>
-                    <span class="value">RGB565 (65K colors)</span>
-                </div>
-                <div class="info-item">
-                    <span class="label">Baud Rate:</span>
-                    <span class="value">2,000,000</span>
+            <!-- Timeline -->
+            <div class="timeline-panel">
+                <input type="range" id="timeline-slider" min="0" max="100" value="0" disabled>
+                <div class="time-display">
+                    <span id="current-time">00:00</span>
+                    <span>/</span>
+                    <span id="total-time">00:00</span>
                 </div>
             </div>
-        </section>
+
+            <!-- Status -->
+            <div id="player-status" class="player-status">
+                Ready
+            </div>
+        </div>
     </main>
-
-    <!-- Footer -->
-    <footer>
-        <p>LED Matrix Control v2.0 | USB Streaming Mode</p>
-    </footer>
 </div>
 
 <script src="app.js"></script>

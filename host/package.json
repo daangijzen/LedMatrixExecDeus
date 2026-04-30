@@ -1,13 +1,12 @@
 ﻿{
-  "name": "led-matrix-control",
+  "name": "led-matrix-video-player",
   "version": "2.0.0",
-  "description": "Control software for LED Matrix streaming",
+  "description": "Video player for LED Matrix streaming",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "test": "node ControllSoftware.js"
+    "start": "electron ."
   },
-  "keywords": ["led", "matrix", "streaming", "usb", "electron"],
+  "keywords": ["led", "matrix", "streaming", "usb", "electron", "video"],
   "author": "Daan Gijzen",
   "license": "MIT",
   "dependencies": {

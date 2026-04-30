@@ -1,9 +1,9 @@
 ﻿/**
- * Electron Main Process
+ * Electron Main Process - Video Player
  * Handles window management and IPC communication
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { SerialPort } = require('serialport');
 
@@ -20,14 +20,14 @@ const FRAME_SIZE = MATRIX_WIDTH * MATRIX_HEIGHT * 2;
  */
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 1200,
-        height: 800,
+        width: 1400,
+        height: 900,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         },
-        title: 'LED Matrix Control',
+        title: 'LED Matrix Video Player',
         backgroundColor: '#1a1a2e'
     });
 
@@ -55,24 +55,42 @@ app.on('activate', () => {
 });
 
 /* ==============================================================================
- * IPC HANDLERS - Communication with renderer
+ * IPC HANDLERS
  * ============================================================================== */
+
+/**
+ * Open file picker for video
+ */
+ipcMain.handle('open-video-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: [
+            { name: 'Videos', extensions: ['mp4', 'mov', 'webm', 'avi', 'mkv'] },
+            { name: 'All Files', extensions: ['*'] }
+        ]
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+        return { success: true, path: result.filePaths[0] };
+    }
+    return { success: false };
+});
 
 /**
  * Get list of available serial ports
  */
 ipcMain.handle('get-ports', async () => {
-    console.log('📡 [MAIN] get-ports called');  // ⬅️ NIEUW: Debug log
+    console.log('📡 [MAIN] get-ports called');
     try {
         const ports = await SerialPort.list();
-        console.log('✅ [MAIN] Found ports:', ports);  // ⬅️ NIEUW: Debug log
+        console.log('✅ [MAIN] Found ports:', ports);
         return ports.map(port => ({
             path: port.path,
             manufacturer: port.manufacturer,
             serialNumber: port.serialNumber
         }));
     } catch (error) {
-        console.error('❌ [MAIN] Error listing ports:', error);  // ⬅️ NIEUW: Debug log
+        console.error('❌ [MAIN] Error listing ports:', error);
         return [];
     }
 });
@@ -94,13 +112,13 @@ ipcMain.handle('connect', async (event, portPath) => {
         return new Promise((resolve, reject) => {
             serialPort.on('open', () => {
                 isConnected = true;
-                console.log('Connected to', portPath);
+                console.log('✅ Connected to', portPath);
                 resolve({ success: true, port: portPath });
             });
 
             serialPort.on('error', (err) => {
                 isConnected = false;
-                console.error('Serial error:', err);
+                console.error('❌ Serial error:', err);
                 reject({ success: false, error: err.message });
             });
         });
