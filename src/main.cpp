@@ -1,14 +1,8 @@
 /**
  * @file main.cpp
- * @brief USB Streaming LED Matrix Controller with WiFi Fallback
+ * @brief USB Streaming LED Matrix Controller with Frame Buffering
  *
- * Dual-mode operation:
- * - USB MODE (default): Receives raw RGB565 pixel data via Serial
- * - WiFi MODE: Web interface for remote control
- *
- * Button Controls:
- * - BUTTON_UP (hold): Switch to WiFi mode
- * - BUTTON_DOWN (hold): Switch to USB mode
+ * Triple-buffered streaming with timer-based display for smooth playback
  *
  * @author [Daan Gijzen & Claude]
  * @date 2026
@@ -16,13 +10,6 @@
 
 #include <Arduino.h>
 #include <Adafruit_Protomatter.h>
-
-// Conditionally include WiFi if enabled
-#ifdef WIFI_ENABLED
-#include <WiFiNINA.h>
-#include <WiFiUdp.h>
-#include "secrets.h"
-#endif
 
 /* ==============================================================================
  * CONFIGURATION CONSTANTS
@@ -33,29 +20,13 @@
 #define MATRIX_HEIGHT 32
 #define FRAME_SIZE (MATRIX_WIDTH * MATRIX_HEIGHT * 2)  // RGB565 = 2 bytes per pixel
 
-// Hardware pin definitions for buttons
-#define BUTTON_UP   2
-#define BUTTON_DOWN 3
-
-// Button timing
-#define BUTTON_HOLD_TIME 1000  // ms to hold button for mode switch
-#define BUTTON_DEBOUNCE  50    // ms debounce delay
-
 // Serial settings
-#define SERIAL_BAUD 2000000    // 2Mbps for fastest USB streaming
-#define CHUNK_SIZE 512         // Read in chunks to avoid buffer overflow
+#define SERIAL_BAUD 3000000    // 3Mbps for fastest USB streaming
+#define CHUNK_SIZE 2048        // Larger chunks for better throughput
 
-/* ==============================================================================
- * OPERATING MODES
- * ============================================================================== */
-
-enum OperatingMode {
-    MODE_USB,    // Stream from USB Serial
-    MODE_WIFI    // WiFi web control
-};
-
-OperatingMode currentMode = MODE_USB;  // Start in USB mode
-bool modeJustChanged = false;
+// Frame buffer settings
+#define NUM_BUFFERS 3          // Triple buffering for smooth playback
+#define TARGET_FPS 24          // Fixed display rate (adjustable via serial command)
 
 /* ==============================================================================
  * HARDWARE CONFIGURATION
@@ -79,128 +50,58 @@ Adafruit_Protomatter matrix(
 );
 
 /* ==============================================================================
- * FRAME BUFFER
+ * FRAME BUFFER RING QUEUE
  * ============================================================================== */
 
-uint16_t frameBuffer[MATRIX_WIDTH * MATRIX_HEIGHT];
+// Triple buffer: one receiving, one ready, one displaying
+uint16_t frameBuffers[NUM_BUFFERS][MATRIX_WIDTH * MATRIX_HEIGHT];
+
+volatile int writeBuffer = 0;      // Buffer currently being written to
+volatile int readBuffer = -1;      // Buffer ready to display (-1 = none)
+volatile int displayBuffer = -1;   // Buffer currently on screen
+
 static int bytesReceived = 0;
+volatile bool newFrameReady = false;
 
 /* ==============================================================================
- * BUTTON STATE TRACKING
+ * TIMING & STATS
  * ============================================================================== */
 
-unsigned long buttonUpPressTime = 0;
-unsigned long buttonDownPressTime = 0;
-bool buttonUpPressed = false;
-bool buttonDownPressed = false;
+volatile unsigned long lastDisplayTime = 0;
+volatile unsigned long frameCount = 0;
+volatile unsigned long droppedFrames = 0;
+unsigned long statsTimer = 0;
 
 /* ==============================================================================
- * DISPLAY FUNCTIONS
+ * DISPLAY TIMER (Software-based for Arduino compatibility)
  * ============================================================================== */
 
-/**
- * @brief Displays mode indicator on matrix
- */
-void displayModeIndicator() {
-    matrix.fillScreen(0);
-    matrix.setTextSize(3);
-    matrix.setTextColor(currentMode == MODE_USB ? 0x07E0 : 0x001F);  // Green for USB, Blue for WiFi
-    matrix.setCursor(10, 8);
-
-    if (currentMode == MODE_USB) {
-        matrix.print("USB MODE");
-    } else {
-        matrix.print("WiFi MODE");
-    }
-
-    matrix.show();
-}
+unsigned long displayInterval = 1000 / TARGET_FPS;  // ms between frames
 
 /**
- * @brief Displays IP address in WiFi mode
+ * @brief Updates display at fixed rate if new frame is available
  */
-void displayIPAddress(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4) {
-    matrix.fillScreen(0);
-    matrix.setTextSize(2);
-    matrix.setTextColor(0xFFFF);  // White
-    matrix.setCursor(5, 4);
-    matrix.print("IP:");
-    matrix.setCursor(5, 20);
-    matrix.print(ip1);
-    matrix.print(".");
-    matrix.print(ip2);
-    matrix.print(".");
-    matrix.print(ip3);
-    matrix.print(".");
-    matrix.print(ip4);
-    matrix.show();
-}
-
-/**
- * @brief Shows "Waiting..." message
- */
-void displayWaiting() {
-    matrix.fillScreen(0);
-    matrix.setTextSize(3);
-    matrix.setTextColor(0xF81F);  // Magenta
-    matrix.setCursor(10, 8);
-    matrix.print("WAITING...");
-    matrix.show();
-}
-
-/* ==============================================================================
- * BUTTON HANDLING
- * ============================================================================== */
-
-/**
- * @brief Checks button states and handles mode switching
- */
-void handleButtons() {
+void updateDisplay() {
     unsigned long now = millis();
 
-    // Read button states (LOW = pressed with INPUT_PULLUP)
-    bool upNow = (digitalRead(BUTTON_UP) == LOW);
-    bool downNow = (digitalRead(BUTTON_DOWN) == LOW);
+    if (now - lastDisplayTime >= displayInterval) {
+        if (readBuffer >= 0) {
+            // New frame available - display it
+            displayBuffer = readBuffer;
+            matrix.drawRGBBitmap(0, 0, frameBuffers[displayBuffer], MATRIX_WIDTH, MATRIX_HEIGHT);
+            matrix.show();
 
-    // BUTTON UP - Switch to WiFi mode
-    if (upNow && !buttonUpPressed) {
-        buttonUpPressed = true;
-        buttonUpPressTime = now;
-    } else if (!upNow && buttonUpPressed) {
-        buttonUpPressed = false;
-    } else if (upNow && buttonUpPressed) {
-        if (now - buttonUpPressTime >= BUTTON_HOLD_TIME && currentMode != MODE_WIFI) {
-            #ifdef WIFI_ENABLED
-            Serial.println("=== Switching to WiFi MODE ===");
-            currentMode = MODE_WIFI;
-            modeJustChanged = true;
-            buttonUpPressed = false;
-            #else
-            Serial.println("WiFi mode not enabled! Compile with -DWIFI_ENABLED");
-            #endif
+            readBuffer = -1;  // Mark as consumed
+            frameCount++;
+            lastDisplayTime = now;
         }
-    }
-
-    // BUTTON DOWN - Switch to USB mode
-    if (downNow && !buttonDownPressed) {
-        buttonDownPressed = true;
-        buttonDownPressTime = now;
-    } else if (!downNow && buttonDownPressed) {
-        buttonDownPressed = false;
-    } else if (downNow && buttonDownPressed) {
-        if (now - buttonDownPressTime >= BUTTON_HOLD_TIME && currentMode != MODE_USB) {
-            Serial.println("=== Switching to USB MODE ===");
-            currentMode = MODE_USB;
-            modeJustChanged = true;
-            buttonDownPressed = false;
-        }
+        // If no frame ready, just skip (will repeat previous frame naturally)
     }
 }
 
 /* ==============================================================================
- * USB STREAMING MODE
+ * USB STREAMING WITH BUFFERING
  * ============================================================================== */
-
 
 void handleUSBStreaming() {
     // Read available data in chunks
@@ -208,20 +109,32 @@ void handleUSBStreaming() {
         int toRead = min(Serial.available(), FRAME_SIZE - bytesReceived);
         toRead = min(toRead, CHUNK_SIZE);
 
-        Serial.readBytes((char*)frameBuffer + bytesReceived, toRead);
+        Serial.readBytes((char*)frameBuffers[writeBuffer] + bytesReceived, toRead);
         bytesReceived += toRead;
     }
 
-    // If we have a complete frame, display it
+    // If we have a complete frame
     if (bytesReceived >= FRAME_SIZE) {
-        // Display frame directly without brightness limiting
-        matrix.drawRGBBitmap(0, 0, frameBuffer, MATRIX_WIDTH, MATRIX_HEIGHT);
-        matrix.show();
+        // Check if we're overrunning (display can't keep up)
+        if (readBuffer >= 0) {
+            droppedFrames++;  // Previous frame not displayed yet
+        }
+
+        // Promote current write buffer to ready
+        readBuffer = writeBuffer;
+
+        // Move to next write buffer (ring buffer)
+        writeBuffer = (writeBuffer + 1) % NUM_BUFFERS;
+
+        // Skip display buffer if it's still in use
+        if (writeBuffer == displayBuffer) {
+            writeBuffer = (writeBuffer + 1) % NUM_BUFFERS;
+        }
 
         // Reset for next frame
         bytesReceived = 0;
 
-        // Clear any excess data
+        // Clear any excess data to stay synchronized
         while (Serial.available() > 0) {
             Serial.read();
         }
@@ -229,118 +142,30 @@ void handleUSBStreaming() {
 }
 
 /* ==============================================================================
- * WiFi MODE (only compiled if WIFI_ENABLED is defined)
+ * STATISTICS & MONITORING
  * ============================================================================== */
 
-#ifdef WIFI_ENABLED
+void printStats() {
+    unsigned long now = millis();
+    if (now - statsTimer >= 5000) {  // Every 5 seconds
+        float actualFPS = frameCount / 5.0;
 
-WiFiUDP udp;
-WiFiServer server(80);
-bool wifiConnected = false;
-bool udpStarted = false;
+        Serial.print("? Stats | FPS: ");
+        Serial.print(actualFPS, 1);
+        Serial.print(" | Dropped: ");
+        Serial.print(droppedFrames);
+        Serial.print(" | Buffers: W=");
+        Serial.print(writeBuffer);
+        Serial.print(" R=");
+        Serial.print(readBuffer);
+        Serial.print(" D=");
+        Serial.println(displayBuffer);
 
-/**
- * @brief Connects to WiFi network
- */
-void connectWiFi() {
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiConnected = true;
-        return;
-    }
-
-    Serial.print("Connecting to WiFi: ");
-    Serial.println(SECRET_SSID);
-
-    WiFi.disconnect();
-    delay(100);
-    WiFi.begin(SECRET_SSID, SECRET_PASS);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-    Serial.println();
-
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiConnected = true;
-        IPAddress ip = WiFi.localIP();
-        Serial.print("Connected! IP: ");
-        Serial.println(ip);
-
-        displayIPAddress(ip[0], ip[1], ip[2], ip[3]);
-
-        server.begin();
-        udp.begin(8888);
-        udpStarted = true;
-
-        delay(3000);
-    } else {
-        Serial.println("WiFi connection failed!");
-        wifiConnected = false;
+        frameCount = 0;
+        droppedFrames = 0;
+        statsTimer = now;
     }
 }
-
-/**
- * @brief Handles WiFi UDP streaming
- */
-void handleWiFiStreaming() {
-    if (!wifiConnected || !udpStarted) return;
-
-    int packetSize = udp.parsePacket();
-    if (packetSize == FRAME_SIZE) {
-        udp.read((char*)frameBuffer, FRAME_SIZE);
-        matrix.drawRGBBitmap(0, 0, frameBuffer, MATRIX_WIDTH, MATRIX_HEIGHT);
-        matrix.show();
-    }
-}
-
-/**
- * @brief Simple web server for status
- */
-void handleWebServer() {
-    if (!wifiConnected) return;
-
-    WiFiClient client = server.available();
-    if (!client) return;
-
-    String request = "";
-    while (client.connected()) {
-        if (client.available()) {
-            char c = client.read();
-            request += c;
-
-            if (c == '\n' && request.endsWith("\r\n\r\n")) {
-                IPAddress ip = WiFi.localIP();
-
-                client.println("HTTP/1.1 200 OK");
-                client.println("Content-Type: text/html");
-                client.println("Connection: close");
-                client.println();
-
-                client.println("<!DOCTYPE html><html><head>");
-                client.println("<title>LED Matrix - WiFi Mode</title>");
-                client.println("<style>body{font-family:Arial;background:#1a1a2e;color:#fff;text-align:center;padding:50px;}</style>");
-                client.println("</head><body>");
-                client.println("<h1>LED Matrix Controller</h1>");
-                client.println("<h2>WiFi Mode Active</h2>");
-                client.println("<p>Send UDP frames to port 8888</p>");
-                client.println("<p>Frame size: 12,288 bytes (RGB565)</p>");
-                client.print("<p>IP: ");
-                client.print(ip);
-                client.println("</p>");
-                client.println("<p><small>Hold DOWN button to switch to USB mode</small></p>");
-                client.println("</body></html>");
-                break;
-            }
-        }
-    }
-
-    client.stop();
-}
-
-#endif  // WIFI_ENABLED
 
 /* ==============================================================================
  * SETUP FUNCTION
@@ -350,8 +175,9 @@ void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(100);
 
-    Serial.println("\n\n===========================================");
+    Serial.println("\n===========================================");
     Serial.println("LED Matrix USB Streaming Controller");
+    Serial.println("Triple-Buffered with Fixed Display Rate");
     Serial.println("===========================================");
     Serial.print("Matrix: ");
     Serial.print(MATRIX_WIDTH);
@@ -362,13 +188,15 @@ void setup() {
     Serial.println(" bytes");
     Serial.print("Serial baud: ");
     Serial.println(SERIAL_BAUD);
-
-    #ifdef WIFI_ENABLED
-    Serial.println("WiFi: ENABLED");
-    #else
-    Serial.println("WiFi: DISABLED");
-    #endif
-
+    Serial.print("Buffers: ");
+    Serial.println(NUM_BUFFERS);
+    Serial.print("Target FPS: ");
+    Serial.println(TARGET_FPS);
+    Serial.print("SRAM per buffer: ");
+    Serial.print(FRAME_SIZE);
+    Serial.print(" bytes (Total: ");
+    Serial.print(FRAME_SIZE * NUM_BUFFERS);
+    Serial.println(" bytes)");
     Serial.println("===========================================\n");
 
     ProtomatterStatus status = matrix.begin();
@@ -379,27 +207,21 @@ void setup() {
         }
     }
 
-    Serial.println("Matrix initialized successfully!");
+    Serial.println("? Matrix initialized successfully!");
 
-    pinMode(BUTTON_UP, INPUT_PULLUP);
-    pinMode(BUTTON_DOWN, INPUT_PULLUP);
+    // Clear all frame buffers
+    for (int i = 0; i < NUM_BUFFERS; i++) {
+        memset(frameBuffers[i], 0, FRAME_SIZE);
+    }
 
-    memset(frameBuffer, 0, FRAME_SIZE);
+    matrix.fillScreen(0);
+    matrix.show();
 
-    displayModeIndicator();
-    delay(2000);
+    lastDisplayTime = millis();
+    statsTimer = millis();
 
-    Serial.println("\n=== USB MODE ACTIVE ===");
-    Serial.println("Waiting for frame data...");
-    Serial.println("Commands:");
-    Serial.println("  - Send 12,288 bytes of RGB565 data for full frame");
-    #ifdef WIFI_ENABLED
-    Serial.println("  - Hold UP button: Switch to WiFi mode");
-    Serial.println("  - Hold DOWN button: Return to USB mode");
-    #endif
-    Serial.println();
-
-    displayWaiting();
+    Serial.println("? Ready for USB streaming...");
+    Serial.println("? Stats will be printed every 5 seconds\n");
 }
 
 /* ==============================================================================
@@ -407,33 +229,12 @@ void setup() {
  * ============================================================================== */
 
 void loop() {
-    handleButtons();
+    // Handle incoming USB data
+    handleUSBStreaming();
 
-    if (modeJustChanged) {
-        modeJustChanged = false;
-        displayModeIndicator();
-        delay(2000);
+    // Update display at fixed rate
+    updateDisplay();
 
-        #ifdef WIFI_ENABLED
-        if (currentMode == MODE_WIFI) {
-            connectWiFi();
-        } else {
-            displayWaiting();
-            Serial.println("Ready for USB streaming...");
-            bytesReceived = 0;  // Reset receive counter
-        }
-        #else
-        displayWaiting();
-        #endif
-    }
-
-    if (currentMode == MODE_USB) {
-        handleUSBStreaming();
-    }
-    #ifdef WIFI_ENABLED
-    else if (currentMode == MODE_WIFI) {
-        handleWiFiStreaming();
-        handleWebServer();
-    }
-    #endif
+    // Print statistics
+    printStats();
 }

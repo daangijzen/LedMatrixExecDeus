@@ -1,20 +1,17 @@
 ﻿/**
  * LED Matrix Video Player
- * Main application logic
+ * Main application logic - OPTIMIZED
  */
 
 const MATRIX_WIDTH = 192;
 const MATRIX_HEIGHT = 32;
-const TARGET_FPS = 30;
-const NO_SIGNAL_CHECK_INTERVAL = 3000;
 
+let targetFPS = 24;
 let isConnected = false;
 let videoLoaded = false;
 let isPlaying = false;
 let isStreaming = false;
-let streamInterval = null;
-let noSignalInterval = null;
-let lastFrameSent = Date.now();
+let lastFrameTime = 0;
 
 // Color mode settings
 let colorMode = '4color';
@@ -24,10 +21,13 @@ let brightnessThreshold = 128;
 const video = document.getElementById('video-player');
 const canvasOriginal = document.getElementById('video-canvas-original');
 const canvasRGB565 = document.getElementById('video-canvas');
-const ctxOriginal = canvasOriginal.getContext('2d');
-const ctxRGB565 = canvasRGB565.getContext('2d');
+const ctxOriginal = canvasOriginal.getContext('2d', { willReadFrequently: true });
+const ctxRGB565 = canvasRGB565.getContext('2d', { willReadFrequently: true });
 ctxOriginal.imageSmoothingEnabled = false;
 ctxRGB565.imageSmoothingEnabled = false;
+
+// Pre-allocate frame array to avoid garbage collection
+const frameArray = new Uint16Array(MATRIX_WIDTH * MATRIX_HEIGHT);
 
 /* ==============================================================================
  * INITIALIZATION
@@ -38,7 +38,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await refreshPorts();
     setupEventListeners();
     updateUI();
-    startNoSignalCheck();
 });
 
 /* ==============================================================================
@@ -68,6 +67,9 @@ function setupEventListeners() {
     document.getElementById('loop-enabled').addEventListener('change', updateVideoSettings);
     document.getElementById('playback-speed').addEventListener('input', updatePlaybackSpeed);
 
+    // FPS slider
+    document.getElementById('target-fps').addEventListener('input', updateTargetFPS);
+
     // Color mode settings
     document.querySelectorAll('input[name="colormode"]').forEach(radio => {
         radio.addEventListener('change', (e) => {
@@ -88,6 +90,16 @@ function setupEventListeners() {
         }
     });
 
+    // Reset threshold button
+    document.getElementById('reset-threshold-btn').addEventListener('click', () => {
+        brightnessThreshold = 128;
+        document.getElementById('brightness-threshold').value = 128;
+        document.getElementById('threshold-value').textContent = 128;
+        if (videoLoaded) {
+            drawFrame();
+        }
+    });
+
     // Video events
     video.addEventListener('loadedmetadata', onVideoLoaded);
     video.addEventListener('timeupdate', onTimeUpdate);
@@ -97,11 +109,11 @@ function setupEventListeners() {
 }
 
 /* ==============================================================================
- * COLOR QUANTIZATION
+ * COLOR QUANTIZATION - OPTIMIZED
  * ============================================================================== */
 
 /**
- * Convert RGB888 to 1-bit RGB palette
+ * Convert RGB888 to RGB565 with quantization - OPTIMIZED
  */
 function quantizeColor(r, g, b) {
     switch (colorMode) {
@@ -111,8 +123,6 @@ function quantizeColor(r, g, b) {
             return quantize7Color(r, g, b);
         case 'monochrome':
             return quantizeMonochrome(r, g, b);
-        case 'pwm':
-            return quantizePWM(r, g, b);
         default:
             return quantize4Color(r, g, b);
     }
@@ -124,29 +134,25 @@ function quantizeColor(r, g, b) {
 function quantize4Color(r, g, b) {
     const threshold = brightnessThreshold;
 
-    // If all values low, return black
     if (r < threshold && g < threshold && b < threshold) {
-        return 0x0000; // Black
+        return 0x0000;
     }
 
-    // If all values high, return white
     if (r >= threshold && g >= threshold && b >= threshold) {
-        return 0xFFFF; // White (R+G+B full)
+        return 0xFFFF;
     }
 
-    // Find dominant color
     const max = Math.max(r, g, b);
 
-    // Return dominant color only
     if (r === max && r >= threshold) {
-        return 0xF800; // Red only
+        return 0xF800;
     } else if (g === max && g >= threshold) {
-        return 0x07E0; // Green only
+        return 0x07E0;
     } else if (b === max && b >= threshold) {
-        return 0x001F; // Blue only
+        return 0x001F;
     }
 
-    return 0x0000; // Default black
+    return 0x0000;
 }
 
 /**
@@ -155,16 +161,14 @@ function quantize4Color(r, g, b) {
 function quantize7Color(r, g, b) {
     const threshold = brightnessThreshold;
 
-    // Threshold each channel independently
     const rOn = r >= threshold;
     const gOn = g >= threshold;
     const bOn = b >= threshold;
 
-    // Combine to RGB565
     let color = 0x0000;
-    if (rOn) color |= 0xF800;  // Red channel full
-    if (gOn) color |= 0x07E0;  // Green channel full
-    if (bOn) color |= 0x001F;  // Blue channel full
+    if (rOn) color |= 0xF800;
+    if (gOn) color |= 0x07E0;
+    if (bOn) color |= 0x001F;
 
     return color;
 }
@@ -173,56 +177,8 @@ function quantize7Color(r, g, b) {
  * Monochrome mode: Black or White only
  */
 function quantizeMonochrome(r, g, b) {
-    // Convert to grayscale using standard weights
     const gray = (r * 0.299 + g * 0.587 + b * 0.114);
-
     return gray >= brightnessThreshold ? 0xFFFF : 0x0000;
-}
-
-/**
- * PWM Dithering mode (placeholder for step 2)
- */
-function quantizePWM(r, g, b) {
-    // For now, return full RGB565 (will implement PWM later)
-    const r5 = r >> 3;
-    const g6 = g >> 2;
-    const b5 = b >> 3;
-    return (r5 << 11) | (g6 << 5) | b5;
-}
-
-/* ==============================================================================
- * NO SIGNAL DETECTION
- * ============================================================================== */
-
-function startNoSignalCheck() {
-    noSignalInterval = setInterval(() => {
-        if (isConnected && !isStreaming) {
-            const timeSinceLastFrame = Date.now() - lastFrameSent;
-
-            if (timeSinceLastFrame > NO_SIGNAL_CHECK_INTERVAL) {
-                sendNoSignalFrame();
-            }
-        }
-    }, NO_SIGNAL_CHECK_INTERVAL);
-}
-
-function sendNoSignalFrame() {
-    const canvas = document.createElement('canvas');
-    canvas.width = MATRIX_WIDTH;
-    canvas.height = MATRIX_HEIGHT;
-    const ctx = canvas.getContext('2d');
-
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, MATRIX_WIDTH, MATRIX_HEIGHT);
-
-    ctx.fillStyle = '#FF0000';
-    ctx.font = '8px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('NO CONNECTION', MATRIX_WIDTH / 2, MATRIX_HEIGHT / 2);
-
-    const imageData = ctx.getImageData(0, 0, MATRIX_WIDTH, MATRIX_HEIGHT);
-    const frame = convertToRGB565(imageData);
-    window.electronAPI.sendFrame(frame);
 }
 
 /* ==============================================================================
@@ -255,7 +211,6 @@ async function connect() {
             isConnected = true;
             updateUI();
             setStatus('Connected to ' + portPath, 'success');
-            handleStartupBehavior();
         } else {
             alert('Connection failed: ' + result.error);
         }
@@ -281,10 +236,9 @@ async function disconnect() {
  * ============================================================================== */
 
 async function sendBlackout() {
-    const blackFrame = new Array(MATRIX_WIDTH * MATRIX_HEIGHT).fill(0x0000);
+    frameArray.fill(0x0000);
     try {
-        await window.electronAPI.sendFrame(blackFrame);
-        lastFrameSent = Date.now();
+        await window.electronAPI.sendFrame(Array.from(frameArray));
         setStatus('Blackout sent', 'success');
     } catch (error) {
         console.error('Error sending blackout:', error);
@@ -403,8 +357,19 @@ function updatePlaybackSpeed(e) {
     document.getElementById('speed-value').textContent = speed.toFixed(1) + 'x';
 }
 
+function updateTargetFPS(e) {
+    targetFPS = parseInt(e.target.value);
+    document.getElementById('fps-value').textContent = targetFPS;
+    console.log('🎯 Target FPS changed to:', targetFPS);
+
+    if (isStreaming) {
+        stopStreaming();
+        startStreaming();
+    }
+}
+
 /* ==============================================================================
- * FRAME EXTRACTION & STREAMING
+ * FRAME EXTRACTION & STREAMING - OPTIMIZED
  * ============================================================================== */
 
 /**
@@ -413,10 +378,8 @@ function updatePlaybackSpeed(e) {
 function drawFrame() {
     if (!videoLoaded) return;
 
-    // Draw original (RGB888)
     ctxOriginal.drawImage(video, 0, 0, MATRIX_WIDTH, MATRIX_HEIGHT);
 
-    // Draw quantized RGB565 preview
     const imageData = ctxOriginal.getImageData(0, 0, MATRIX_WIDTH, MATRIX_HEIGHT);
     const rgb565ImageData = convertImageDataToRGB565Preview(imageData);
     ctxRGB565.putImageData(rgb565ImageData, 0, 0);
@@ -434,10 +397,8 @@ function convertImageDataToRGB565Preview(imageData) {
         const g = data[i + 1];
         const b = data[i + 2];
 
-        // Quantize
         const rgb565 = quantizeColor(r, g, b);
 
-        // Convert back to RGB888 for preview
         const r5 = (rgb565 >> 11) & 0x1F;
         const g6 = (rgb565 >> 5) & 0x3F;
         const b5 = rgb565 & 0x1F;
@@ -452,22 +413,17 @@ function convertImageDataToRGB565Preview(imageData) {
 }
 
 /**
- * Convert ImageData to RGB565 array with quantization
+ * Convert ImageData to RGB565 array - OPTIMIZED
  */
 function convertToRGB565(imageData) {
     const data = imageData.data;
-    const frame = new Array(MATRIX_WIDTH * MATRIX_HEIGHT);
 
-    for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-
-        // Quantize based on selected mode
-        frame[i / 4] = quantizeColor(r, g, b);
+    // Write directly to pre-allocated array
+    for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        frameArray[j] = quantizeColor(data[i], data[i + 1], data[i + 2]);
     }
 
-    return frame;
+    return frameArray;
 }
 
 /**
@@ -481,15 +437,15 @@ function extractFrame() {
 }
 
 /**
- * Send frame to matrix
+ * Send frame to matrix - OPTIMIZED
  */
 async function sendFrame() {
     const frame = extractFrame();
     if (!frame) return;
 
     try {
-        await window.electronAPI.sendFrame(frame);
-        lastFrameSent = Date.now();
+        // Fire and forget - don't await
+        window.electronAPI.sendFrame(Array.from(frame));
     } catch (error) {
         console.error('Error sending frame:', error);
         stopStreaming();
@@ -508,6 +464,9 @@ function toggleStreaming() {
     }
 }
 
+/**
+ * Start streaming - OPTIMIZED with requestAnimationFrame
+ */
 function startStreaming() {
     if (!isConnected || !videoLoaded) return;
 
@@ -520,56 +479,39 @@ function startStreaming() {
         playVideo();
     }
 
-    const frameInterval = 1000 / TARGET_FPS;
-    streamInterval = setInterval(() => {
-        if (isPlaying) {
-            sendFrame();
-        }
-    }, frameInterval);
+    const frameInterval = 1000 / targetFPS;
+    lastFrameTime = performance.now();
 
-    setStatus('Streaming to matrix @ ' + TARGET_FPS + ' FPS', 'success');
+    // Use requestAnimationFrame for better timing
+    function streamLoop() {
+        if (!isStreaming) return;
+
+        const now = performance.now();
+        const elapsed = now - lastFrameTime;
+
+        if (elapsed >= frameInterval && isPlaying) {
+            sendFrame();
+            lastFrameTime = now;
+        }
+
+        requestAnimationFrame(streamLoop);
+    }
+
+    requestAnimationFrame(streamLoop);
+
+    setStatus(`Streaming @ ${targetFPS} FPS`, 'success');
 }
 
 function stopStreaming() {
     if (!isStreaming) return;
 
     isStreaming = false;
-    if (streamInterval) {
-        clearInterval(streamInterval);
-        streamInterval = null;
-    }
 
     document.getElementById('stream-btn').textContent = '🚀 Stream to Matrix';
     document.getElementById('stream-btn').classList.remove('btn-danger');
     document.getElementById('stream-btn').classList.add('btn-success');
 
     setStatus('Streaming stopped', 'info');
-}
-
-/* ==============================================================================
- * STARTUP BEHAVIOR
- * ============================================================================== */
-
-function handleStartupBehavior() {
-    if (!videoLoaded) return;
-
-    const startup = document.querySelector('input[name="startup"]:checked').value;
-
-    switch (startup) {
-        case 'hold':
-            video.currentTime = 0;
-            drawFrame();
-            sendFrame();
-            break;
-
-        case 'autoplay':
-            startStreaming();
-            break;
-
-        case 'black':
-            sendBlackout();
-            break;
-    }
 }
 
 /* ==============================================================================

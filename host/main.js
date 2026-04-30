@@ -1,6 +1,6 @@
 ﻿/**
  * Electron Main Process - Video Player
- * Handles window management and IPC communication
+ * Optimized for maximum throughput
  */
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
@@ -15,13 +15,16 @@ const MATRIX_WIDTH = 192;
 const MATRIX_HEIGHT = 32;
 const FRAME_SIZE = MATRIX_WIDTH * MATRIX_HEIGHT * 2;
 
+// Pre-allocate buffer to avoid repeated allocation
+const frameBuffer = Buffer.allocUnsafe(FRAME_SIZE);
+
 /**
  * Create main application window
  */
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 1400,
-        height: 900,
+        width: 1200,
+        height: 800,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -34,7 +37,7 @@ function createWindow() {
     mainWindow.loadFile('renderer/index.html');
 
     // Open DevTools in development
-    mainWindow.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools();
 }
 
 app.whenReady().then(createWindow);
@@ -80,23 +83,21 @@ ipcMain.handle('open-video-file', async () => {
  * Get list of available serial ports
  */
 ipcMain.handle('get-ports', async () => {
-    console.log('📡 [MAIN] get-ports called');
     try {
         const ports = await SerialPort.list();
-        console.log('✅ [MAIN] Found ports:', ports);
         return ports.map(port => ({
             path: port.path,
             manufacturer: port.manufacturer,
             serialNumber: port.serialNumber
         }));
     } catch (error) {
-        console.error('❌ [MAIN] Error listing ports:', error);
+        console.error('❌ Error listing ports:', error);
         return [];
     }
 });
 
 /**
- * Connect to serial port
+ * Connect to serial port with optimized settings
  */
 ipcMain.handle('connect', async (event, portPath) => {
     try {
@@ -106,11 +107,20 @@ ipcMain.handle('connect', async (event, portPath) => {
 
         serialPort = new SerialPort({
             path: portPath,
-            baudRate: 2000000
+            baudRate: 3000000,
+            // Optimization: larger buffer, disable flow control for max speed
+            highWaterMark: FRAME_SIZE * 4,  // Buffer 4 frames
+            autoOpen: false
         });
 
         return new Promise((resolve, reject) => {
-            serialPort.on('open', () => {
+            serialPort.open((err) => {
+                if (err) {
+                    isConnected = false;
+                    reject({ success: false, error: err.message });
+                    return;
+                }
+
                 isConnected = true;
                 console.log('✅ Connected to', portPath);
                 resolve({ success: true, port: portPath });
@@ -119,7 +129,6 @@ ipcMain.handle('connect', async (event, portPath) => {
             serialPort.on('error', (err) => {
                 isConnected = false;
                 console.error('❌ Serial error:', err);
-                reject({ success: false, error: err.message });
             });
         });
     } catch (error) {
@@ -144,29 +153,25 @@ ipcMain.handle('disconnect', async () => {
 });
 
 /**
- * Send frame to matrix
+ * Send frame to matrix - OPTIMIZED
  */
 ipcMain.handle('send-frame', async (event, frameData) => {
+    if (!serialPort || !serialPort.isOpen) {
+        return { success: false, error: 'Not connected' };
+    }
+
     try {
-        if (!serialPort || !serialPort.isOpen) {
-            return { success: false, error: 'Not connected' };
-        }
-
-        // frameData is array of RGB565 values
-        const buffer = Buffer.alloc(FRAME_SIZE);
+        // OPTIMIZATION: Write directly to pre-allocated buffer
+        // Avoid creating new buffer each frame
         for (let i = 0; i < frameData.length; i++) {
-            buffer.writeUInt16LE(frameData[i], i * 2);
+            frameBuffer.writeUInt16LE(frameData[i], i * 2);
         }
 
-        return new Promise((resolve, reject) => {
-            serialPort.write(buffer, (err) => {
-                if (err) {
-                    reject({ success: false, error: err.message });
-                } else {
-                    resolve({ success: true });
-                }
-            });
-        });
+        // OPTIMIZATION: Use callback-free write for speed
+        // Don't wait for write completion
+        serialPort.write(frameBuffer);
+
+        return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
     }
