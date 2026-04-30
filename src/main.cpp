@@ -81,35 +81,35 @@ bool udpStarted = false;      // Flag indicating if UDP listener is active
  * IMAGE STORAGE
  * ============================================================================== */
 
-uint16_t imageBuffer[IMAGE_BUFFER_SIZE];  // Static buffer for 32x32 image (RGB565)
-int storedImageWidth  = 0;                // Width of stored image
-int storedImageHeight = 0;                // Height of stored image
-bool hasStoredImage   = false;            // Flag indicating if an image is stored
-int16_t imageX        = MATRIX_WIDTH;     // X position for scrolling image
-bool imageScrollEnabled = true;           // Image scroll on/off
-bool imageRepeatEnabled = false;          // NEW: Infinite repeat mode
-int imageRepeatSpacing = 50;              // NEW: Pixels between repeats
-int8_t imageScrollDirection = -1;          // -1 Left, 1 Right
+uint16_t imageBuffer[IMAGE_BUFFER_SIZE];    // Static buffer for 32x32 image (RGB565)
+int storedImageWidth        = 0;                  // Width of stored image
+int storedImageHeight       = 0;                  // Height of stored image
+bool hasStoredImage         = false;              // Flag indicating if an image is stored
+int16_t imageX              = MATRIX_WIDTH;       // X position for scrolling image
+bool imageScrollEnabled     = true;             // Image scroll on/off
+bool imageRepeatEnabled     = true;             // NEW: Infinite repeat mode
+int imageRepeatSpacing      = 5;                // NEW: Pixels between repeats
+int8_t imageScrollDirection = -1;           // -1 Left, 1 Right
 
 /* ==============================================================================
  * TEXT DISPLAY VARIABLES
  * ============================================================================== */
 
-String scrollText     = "Verbinden met WiFi...";  // Current text to display
-int16_t textX         = MATRIX_WIDTH;             // Current X position of text
-int16_t textY         = 10;                       // Vertical position of text
-int16_t textMinX;                                 // Minimum X (for scroll reset)
-uint16_t textColor    = 0xF81F;                   // Text color (default: Magenta)
-int textSize          = 1;                        // Text size (1-5)
-bool scrollEnabled    = true;                     // Text scroll on/off
-int alignment         = 0;                        // 0=scroll, 1=center, 2=right
-bool textRepeatEnabled = false;                   // NEW: Infinite repeat mode for text
-int textRepeatSpacing = 100;                      // NEW: Pixels between text repeats
-int8_t textScrollDirection = -1;                  // NEW: -1 = left, 1 = right
+String scrollText           = "Verbinden met WiFi...";  // Current text to display
+int16_t textX               = MATRIX_WIDTH;             // Current X position of text
+int16_t textY               = 2;                       // Vertical position of text
+int16_t textMinX            = 0;                                 // Minimum X (for scroll reset)
+uint16_t textColor          = 0xF81F;                   // Text color (default: Magenta)
+int textSize                = 4;                        // Text size (1-5)
+bool scrollEnabled          = true;                     // Text scroll on/off
+int alignment               = 0;                        // 0=scroll, 1=center, 2=right
+bool textRepeatEnabled      = true;                   // NEW: Infinite repeat mode for text
+int textRepeatSpacing       = 10;                      // NEW: Pixels between text repeats
+int8_t textScrollDirection  = -1;                  // NEW: -1 = left, 1 = right
 
 // Scroll timing
 unsigned long lastScrollTime = 0;
-int scrollDelay = 50;  // Delay between scroll steps (ms)
+int scrollDelay = 10;  // Delay between scroll steps (ms)
 
 /* ==============================================================================
  * BUTTON CONTROL
@@ -1109,6 +1109,19 @@ else if (endpoint.indexOf("/setImgScroll") >= 0) {
             int newDirection = postData.substring(idx + 12).toInt();
             if (newDirection == -1 || newDirection == 1) {
                 textScrollDirection = newDirection;
+                
+                // Reset position based on new direction
+                if (textScrollDirection == -1) {  // Left
+                    textX = MATRIX_WIDTH;  // Start from right edge
+                } else {  // Right
+                    // Calculate text width for proper start position
+                    int16_t x1, y1;
+                    uint16_t w, h;
+                    matrix.setTextSize(textSize);
+                    matrix.getTextBounds(scrollText.c_str(), 0, 0, &x1, &y1, &w, &h);
+                    textX = -(int)w;  // Start completely off-screen to the left
+                }
+                
                 client.println(textScrollDirection == -1 ? "Text scrolling left!" : "Text scrolling right!");
                 Serial.print("Text direction: ");
                 Serial.println(textScrollDirection == -1 ? "LEFT" : "RIGHT");
@@ -1122,6 +1135,14 @@ else if (endpoint.indexOf("/setImgScroll") >= 0) {
             int newDirection = postData.substring(idx + 12).toInt();
             if (newDirection == -1 || newDirection == 1) {
                 imageScrollDirection = newDirection;
+                
+                // Reset position based on new direction
+                if (imageScrollDirection == -1) {  // Left
+                    imageX = MATRIX_WIDTH;  // Start from right edge
+                } else {  // Right
+                    imageX = -storedImageWidth;  // Start completely off-screen to the left
+                }
+                
                 client.println(imageScrollDirection == -1 ? "Image scrolling left!" : "Image scrolling right!");
                 Serial.print("Image direction: ");
                 Serial.println(imageScrollDirection == -1 ? "LEFT" : "RIGHT");
@@ -1445,6 +1466,45 @@ void handleOSCMessages() {
             imageRepeatSpacing = spacing;
             Serial.print("Image Spacing: ");
             Serial.println(imageRepeatSpacing);
+        }
+    }
+    // NEW: /textDirection - set text scroll direction
+    else if (strncmp(packetBuffer, "/textDirection", 14) == 0) {
+        int32_t direction = parseOSCInt(packetBuffer, len);
+        if (direction == -1 || direction == 1) {
+            textScrollDirection = direction;
+            
+            // Reset position based on new direction
+            if (textScrollDirection == -1) {  // Left
+                textX = MATRIX_WIDTH;  // Start from right edge
+            } else {  // Right
+                // Calculate text width for proper start position
+                int16_t x1, y1;
+                uint16_t w, h;
+                matrix.setTextSize(textSize);
+                matrix.getTextBounds(scrollText.c_str(), 0, 0, &x1, &y1, &w, &h);
+                textX = -(int)w;  // Start completely off-screen to the left
+            }
+            
+            Serial.print("Text Direction: ");
+            Serial.println(textScrollDirection == -1 ? "LEFT" : "RIGHT");
+        }
+    }
+    // NEW: /imageDirection - set image scroll direction
+    else if (strncmp(packetBuffer, "/imageDirection", 15) == 0) {
+        int32_t direction = parseOSCInt(packetBuffer, len);
+        if (direction == -1 || direction == 1) {
+            imageScrollDirection = direction;
+            
+            // Reset position based on new direction
+            if (imageScrollDirection == -1) {  // Left
+                imageX = MATRIX_WIDTH;  // Start from right edge
+            } else {  // Right
+                imageX = -storedImageWidth;  // Start completely off-screen to the left
+            }
+            
+            Serial.print("Image Direction: ");
+            Serial.println(imageScrollDirection == -1 ? "LEFT" : "RIGHT");
         }
     }
 }
