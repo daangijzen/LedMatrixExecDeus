@@ -87,6 +87,9 @@ int storedImageHeight = 0;                // Height of stored image
 bool hasStoredImage   = false;            // Flag indicating if an image is stored
 int16_t imageX        = MATRIX_WIDTH;     // X position for scrolling image
 bool imageScrollEnabled = true;           // Image scroll on/off
+bool imageRepeatEnabled = false;          // NEW: Infinite repeat mode
+int imageRepeatSpacing = 50;              // NEW: Pixels between repeats
+int8_t imageScrollDirection = -1;          // -1 Left, 1 Right
 
 /* ==============================================================================
  * TEXT DISPLAY VARIABLES
@@ -100,6 +103,9 @@ uint16_t textColor    = 0xF81F;                   // Text color (default: Magent
 int textSize          = 1;                        // Text size (1-5)
 bool scrollEnabled    = true;                     // Text scroll on/off
 int alignment         = 0;                        // 0=scroll, 1=center, 2=right
+bool textRepeatEnabled = false;                   // NEW: Infinite repeat mode for text
+int textRepeatSpacing = 100;                      // NEW: Pixels between text repeats
+int8_t textScrollDirection = -1;                  // NEW: -1 = left, 1 = right
 
 // Scroll timing
 unsigned long lastScrollTime = 0;
@@ -468,6 +474,58 @@ void serveImageUploadPage(WiFiClient& client) {
     client.println("</select>");
     client.println("<button class='btn-blue' onclick='sendImgScroll()'>Apply</button>");
     client.println("</div>");
+
+    // NEW: Text Repeat Settings
+    client.println("<div class='control-row'>");
+    client.println("<label>Text Repeat:</label>");
+    client.println("<select id='textRepeatSelect'>");
+    client.println("<option value='0'>Once</option>");
+    client.println("<option value='1'>Infinite Loop</option>");
+    client.println("</select>");
+    client.println("<button class='btn-blue' onclick='sendTextRepeat()'>Apply</button>");
+    client.println("</div>");
+    client.println("<div class='control-row'>");
+    client.println("<label>Text Spacing:</label>");
+    client.println("<input type='number' id='textSpacingInput' value='100' min='0' max='500' style='width:80px'>");
+    client.println("<span>px</span>");
+    client.println("<button class='btn-blue' onclick='sendTextSpacing()'>Apply</button>");
+    client.println("</div>");
+
+    // NEW: Image Repeat Settings
+    client.println("<div class='control-row'>");
+    client.println("<label>Image Repeat:</label>");
+    client.println("<select id='imageRepeatSelect'>");
+    client.println("<option value='0'>Once</option>");
+    client.println("<option value='1'>Infinite Loop</option>");
+    client.println("</select>");
+    client.println("<button class='btn-blue' onclick='sendImageRepeat()'>Apply</button>");
+    client.println("</div>");
+    client.println("<div class='control-row'>");
+    client.println("<label>Image Spacing:</label>");
+    client.println("<input type='number' id='imageSpacingInput' value='50' min='0' max='300' style='width:80px'>");
+    client.println("<span>px</span>");
+    client.println("<button class='btn-blue' onclick='sendImageSpacing()'>Apply</button>");
+    client.println("</div>");
+
+    // NEW: Scroll Direction Settings
+    client.println("<div class='control-row'>");
+    client.println("<label>Text Direction:</label>");
+    client.println("<select id='textDirectionSelect'>");
+    client.println("<option value='-1'>? Left</option>");
+    client.println("<option value='1'>? Right</option>");
+    client.println("</select>");
+    client.println("<button class='btn-blue' onclick='sendTextDirection()'>Apply</button>");
+    client.println("</div>");
+
+    client.println("<div class='control-row'>");
+    client.println("<label>Image Direction:</label>");
+    client.println("<select id='imageDirectionSelect'>");
+    client.println("<option value='-1'>? Left</option>");
+    client.println("<option value='1'>? Right</option>");
+    client.println("</select>");
+    client.println("<button class='btn-blue' onclick='sendImageDirection()'>Apply</button>");
+    client.println("</div>");
+
     client.println("</div>");
     client.println("</div>");
 
@@ -706,6 +764,12 @@ void serveImageUploadPage(WiFiClient& client) {
     client.println("function sendSpeed() { sendSetting('/setSpeed', { speed: parseInt(document.getElementById('speedSlider').value) }); }");
     client.println("function sendAlign() { sendSetting('/setAlign', { align: parseInt(document.getElementById('alignSelect').value) }); }");
     client.println("function sendImgScroll() { sendSetting('/setImgScroll', { scroll: parseInt(document.getElementById('imgScrollSelect').value) }); }");
+    client.println("function sendTextRepeat() { sendSetting('/setTextRepeat', { repeat: parseInt(document.getElementById('textRepeatSelect').value) }); }");
+    client.println("function sendTextSpacing() { sendSetting('/setTextSpacing', { spacing: parseInt(document.getElementById('textSpacingInput').value) }); }");
+    client.println("function sendImageRepeat() { sendSetting('/setImageRepeat', { repeat: parseInt(document.getElementById('imageRepeatSelect').value) }); }");
+    client.println("function sendImageSpacing() { sendSetting('/setImageSpacing', { spacing: parseInt(document.getElementById('imageSpacingInput').value) }); }");
+    client.println("function sendTextDirection() { sendSetting('/setTextDirection', { direction: parseInt(document.getElementById('textDirectionSelect').value) }); }");
+    client.println("function sendImageDirection() { sendSetting('/setImageDirection', { direction: parseInt(document.getElementById('imageDirectionSelect').value) }); }");
 
     client.println("</script>");
     client.println("</body></html>");
@@ -982,7 +1046,7 @@ void handleSettingsPost(WiFiClient& client, String& endpoint, String& postData) 
             }
         }
     }
-    else if (endpoint.indexOf("/setImgScroll") >= 0) {
+else if (endpoint.indexOf("/setImgScroll") >= 0) {
         int idx = postData.indexOf("\"scroll\":");
         if (idx >= 0) {
             imageScrollEnabled = postData.substring(idx + 9).toInt() != 0;
@@ -990,6 +1054,78 @@ void handleSettingsPost(WiFiClient& client, String& endpoint, String& postData) 
             client.println(imageScrollEnabled ? "Image scroll enabled!" : "Image scroll disabled!");
             Serial.print("Image scroll: ");
             Serial.println(imageScrollEnabled ? "ON" : "OFF");
+        }
+    }
+    // NEW: Text Repeat
+    else if (endpoint.indexOf("/setTextRepeat") >= 0) {
+        int idx = postData.indexOf("\"repeat\":");
+        if (idx >= 0) {
+            textRepeatEnabled = postData.substring(idx + 9).toInt() != 0;
+            client.println(textRepeatEnabled ? "Text repeat enabled!" : "Text repeat disabled!");
+            Serial.print("Text repeat: ");
+            Serial.println(textRepeatEnabled ? "ON" : "OFF");
+        }
+    }
+    // NEW: Text Spacing
+    else if (endpoint.indexOf("/setTextSpacing") >= 0) {
+        int idx = postData.indexOf("\"spacing\":");
+        if (idx >= 0) {
+            int newSpacing = postData.substring(idx + 10).toInt();
+            if (newSpacing >= 0 && newSpacing <= 500) {  // Allow 0!
+                textRepeatSpacing = newSpacing;
+                client.println("Text spacing updated!");
+                Serial.print("Text spacing: ");
+                Serial.println(textRepeatSpacing);
+            }
+        }
+    }
+    // NEW: Image Repeat
+    else if (endpoint.indexOf("/setImageRepeat") >= 0) {
+        int idx = postData.indexOf("\"repeat\":");
+        if (idx >= 0) {
+            imageRepeatEnabled = postData.substring(idx + 9).toInt() != 0;
+            client.println(imageRepeatEnabled ? "Image repeat enabled!" : "Image repeat disabled!");
+            Serial.print("Image repeat: ");
+            Serial.println(imageRepeatEnabled ? "ON" : "OFF");
+        }
+    }
+    // NEW: Image Spacing
+    else if (endpoint.indexOf("/setImageSpacing") >= 0) {
+        int idx = postData.indexOf("\"spacing\":");
+        if (idx >= 0) {
+            int newSpacing = postData.substring(idx + 10).toInt();
+            if (newSpacing >= 0 && newSpacing <= 300) {
+                imageRepeatSpacing = newSpacing;
+                client.println("Image spacing updated!");
+                Serial.print("Image spacing: ");
+                Serial.println(imageRepeatSpacing);
+            }
+        }
+    }
+    // NEW: Text Direction
+    else if (endpoint.indexOf("/setTextDirection") >= 0) {
+        int idx = postData.indexOf("\"direction\":");
+        if (idx >= 0) {
+            int newDirection = postData.substring(idx + 12).toInt();
+            if (newDirection == -1 || newDirection == 1) {
+                textScrollDirection = newDirection;
+                client.println(textScrollDirection == -1 ? "Text scrolling left!" : "Text scrolling right!");
+                Serial.print("Text direction: ");
+                Serial.println(textScrollDirection == -1 ? "LEFT" : "RIGHT");
+            }
+        }
+    }
+    // NEW: Image Direction
+    else if (endpoint.indexOf("/setImageDirection") >= 0) {
+        int idx = postData.indexOf("\"direction\":");
+        if (idx >= 0) {
+            int newDirection = postData.substring(idx + 12).toInt();
+            if (newDirection == -1 || newDirection == 1) {
+                imageScrollDirection = newDirection;
+                client.println(imageScrollDirection == -1 ? "Image scrolling left!" : "Image scrolling right!");
+                Serial.print("Image direction: ");
+                Serial.println(imageScrollDirection == -1 ? "LEFT" : "RIGHT");
+            }
         }
     }
     else {
@@ -1270,7 +1406,7 @@ void handleOSCMessages() {
         }
     }
     // /scroll - toggle scroll
-    else if (strncmp(packetBuffer, "/scroll", 7) == 0) {
+    if (strncmp(packetBuffer, "/scroll", 7) == 0) {
         int32_t enableScroll = parseOSCInt(packetBuffer, len);
         scrollEnabled = (enableScroll != 0);
         if (scrollEnabled) {
@@ -1279,11 +1415,39 @@ void handleOSCMessages() {
         Serial.print("Scroll: ");
         Serial.println(scrollEnabled ? "ON" : "OFF");
     }
+    // NEW: /textRepeat - toggle text repeat
+    else if (strncmp(packetBuffer, "/textRepeat", 11) == 0) {
+        int32_t enableRepeat = parseOSCInt(packetBuffer, len);
+        textRepeatEnabled = (enableRepeat != 0);
+        Serial.print("Text Repeat: ");
+        Serial.println(textRepeatEnabled ? "ON" : "OFF");
+    }
+    // NEW: /textSpacing - set text repeat spacing
+    else if (strncmp(packetBuffer, "/textSpacing", 12) == 0) {
+        int32_t spacing = parseOSCInt(packetBuffer, len);
+        if (spacing >= 10 && spacing <= 500) {
+            textRepeatSpacing = spacing;
+            Serial.print("Text Spacing: ");
+            Serial.println(textRepeatSpacing);
+        }
+    }
+    // NEW: /imageRepeat - toggle image repeat
+    else if (strncmp(packetBuffer, "/imageRepeat", 12) == 0) {
+        int32_t enableRepeat = parseOSCInt(packetBuffer, len);
+        imageRepeatEnabled = (enableRepeat != 0);
+        Serial.print("Image Repeat: ");
+        Serial.println(imageRepeatEnabled ? "ON" : "OFF");
+    }
+    // NEW: /imageSpacing - set image repeat spacing
+    else if (strncmp(packetBuffer, "/imageSpacing", 13) == 0) {
+        int32_t spacing = parseOSCInt(packetBuffer, len);
+        if (spacing >= 10 && spacing <= 300) {
+            imageRepeatSpacing = spacing;
+            Serial.print("Image Spacing: ");
+            Serial.println(imageRepeatSpacing);
+        }
+    }
 }
-
-/* ==============================================================================
- * DISPLAY UPDATE FUNCTION
- * ============================================================================== */
 
 /**
  * @brief Updates the matrix display
@@ -1301,35 +1465,140 @@ void updateDisplay(unsigned long currentTime) {
     matrix.fillScreen(0);
 
     if (hasStoredImage) {
-        // Draw stored image
-        for (int y = 0; y < storedImageHeight; y++) {
-            for (int x = 0; x < storedImageWidth; x++) {
-                int drawX = imageX + x;
-                // Only draw if pixel is visible
-                if (drawX >= 0 && drawX < MATRIX_WIDTH) {
-                    int idx = y * storedImageWidth + x;
-                    matrix.drawPixel(drawX, y, imageBuffer[idx]);
+        // Calculate total width including spacing
+        int totalImageWidth = storedImageWidth + imageRepeatSpacing;
+
+        // Draw stored image (with repeat if enabled)
+        if (imageRepeatEnabled) {
+            // Ensure minimum of 1 pixel spacing to prevent division issues
+            if (totalImageWidth <= 0) totalImageWidth = storedImageWidth;
+
+            // Draw multiple instances for seamless loop
+            // We need enough instances to cover the screen + 2 extra for seamless transition
+            int numInstances = (MATRIX_WIDTH / totalImageWidth) + 3;
+            if (numInstances < 3) numInstances = 3;
+
+            for (int instance = 0; instance < numInstances; instance++) {
+                int instanceX = imageX + (instance * totalImageWidth);
+
+                // Skip if this instance is completely off screen (optimization)
+                if (instanceX > MATRIX_WIDTH || instanceX + storedImageWidth < 0) continue;
+
+                for (int y = 0; y < storedImageHeight; y++) {
+                    for (int x = 0; x < storedImageWidth; x++) {
+                        int drawX = instanceX + x;
+                        // Only draw if pixel is visible
+                        if (drawX >= 0 && drawX < MATRIX_WIDTH) {
+                            int idx = y * storedImageWidth + x;
+                            matrix.drawPixel(drawX, y, imageBuffer[idx]);
+                        }
+                    }
+                }
+            }
+
+            // Scroll image if enabled
+            if (imageScrollEnabled) {
+                imageX += imageScrollDirection;  // Use direction
+
+                // Reset based on direction
+                if (imageScrollDirection < 0) {  // Scrolling left
+                    if (imageX <= -totalImageWidth) {
+                        imageX += totalImageWidth;
+                    }
+                } else {  // Scrolling right
+                    if (imageX >= totalImageWidth) {
+                        imageX -= totalImageWidth;
+                    }
+                }
+            }
+        } else {
+            // Original single-pass behavior
+            for (int y = 0; y < storedImageHeight; y++) {
+                for (int x = 0; x < storedImageWidth; x++) {
+                    int drawX = imageX + x;
+                    if (drawX >= 0 && drawX < MATRIX_WIDTH) {
+                        int idx = y * storedImageWidth + x;
+                        matrix.drawPixel(drawX, y, imageBuffer[idx]);
+                    }
+                }
+            }
+
+            if (imageScrollEnabled) {
+                imageX += imageScrollDirection;  // Use direction
+
+                // Reset based on direction
+                if (imageScrollDirection < 0) {  // Scrolling left
+                    if (imageX < -storedImageWidth) {
+                        imageX = MATRIX_WIDTH;
+                    }
+                } else {  // Scrolling right
+                    if (imageX > MATRIX_WIDTH) {
+                        imageX = -storedImageWidth;
+                    }
                 }
             }
         }
-
-        // Scroll image if enabled
-        if (imageScrollEnabled) {
-            imageX--;
-            if (imageX < -storedImageWidth) {
-                imageX = MATRIX_WIDTH;
-            }
-        }
     } else {
-        // Draw scrolling text
-        matrix.setCursor(textX, textY);
-        matrix.print(scrollText);
+        // Draw scrolling text (with repeat if enabled)
+        if (textRepeatEnabled && scrollEnabled) {
+            // Calculate text width
+            int16_t x1, y1;
+            uint16_t w, h;
+            matrix.setTextSize(textSize);
+            matrix.getTextBounds(scrollText.c_str(), 0, 0, &x1, &y1, &w, &h);
 
-        // Scroll text if enabled
-        if (scrollEnabled) {
-            textX--;
-            if (textX < textMinX) {
-                textX = MATRIX_WIDTH;
+            // Total width is text + spacing (allow 0 spacing)
+            int totalTextWidth = (int)w + textRepeatSpacing;
+
+            // Ensure minimum width
+            if (totalTextWidth <= 0) totalTextWidth = w > 0 ? w : 10;
+
+            // Calculate number of instances needed
+            int numInstances = (MATRIX_WIDTH / totalTextWidth) + 3;
+            if (numInstances < 3) numInstances = 3;
+
+            // Draw multiple instances for seamless loop
+            for (int instance = 0; instance < numInstances; instance++) {
+                int instanceX = textX + (instance * totalTextWidth);
+
+                // Skip if completely off screen (optimization)
+                if (instanceX > MATRIX_WIDTH || instanceX + (int)w < 0) continue;
+
+                matrix.setCursor(instanceX, textY);
+                matrix.print(scrollText);
+            }
+
+            // Scroll text
+            textX += textScrollDirection;  // Use direction
+
+            // Reset based on direction
+            if (textScrollDirection < 0) {  // Scrolling left
+                if (textX <= -totalTextWidth) {
+                    textX += totalTextWidth;
+                }
+            } else {  // Scrolling right
+                if (textX >= totalTextWidth) {
+                    textX -= totalTextWidth;
+                }
+            }
+        } else {
+            // Original single-pass behavior
+            matrix.setCursor(textX, textY);
+            matrix.print(scrollText);
+
+            if (scrollEnabled) {
+                textX += textScrollDirection;  // Use direction
+
+                // Reset based on direction
+                if (textScrollDirection < 0) {  // Scrolling left
+                    if (textX < textMinX) {
+                        textX = MATRIX_WIDTH;
+                    }
+                } else {  // Scrolling right
+                    if (textX > MATRIX_WIDTH) {
+                        textX = textMinX;
+                    }
+                }
             }
         }
     }
