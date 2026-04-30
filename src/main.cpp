@@ -112,6 +112,17 @@ unsigned long lastScrollTime = 0;
 int scrollDelay = 10;  // Delay between scroll steps (ms)
 
 /* ==============================================================================
+ * STROBOSCOPE EFFECT VARIABLES
+ * ============================================================================== */
+
+bool strobeEnabled = false;                       // Strobe on/off
+uint16_t strobeColor = 0xFFFF;                    // Flash color (default: white)
+int strobeInterval = 100;                         // Milliseconds between flashes
+unsigned long lastStrobeTime = 0;                 // Last strobe toggle time
+bool strobeState = false;                         // Current strobe state (on/off)
+
+
+/* ==============================================================================
  * BUTTON CONTROL
  * ============================================================================== */
 
@@ -527,6 +538,44 @@ void serveImageUploadPage(WiFiClient& client) {
     client.println("</div>");
 
     client.println("</div>");
+
+    // NEW: Stroboscope Settings
+    client.println("<h2>Stroboscope Effect</h2>");
+    client.println("<div class='controls'>");
+
+    client.println("<div class='control-row'>");
+    client.println("<label>Strobe Mode:</label>");
+    client.println("<select id='strobeSelect'>");
+    client.println("<option value='0'>Off</option>");
+    client.println("<option value='1'>On</option>");
+    client.println("</select>");
+    client.println("<button class='btn-blue' onclick='sendStrobe()'>Apply</button>");
+    client.println("</div>");
+
+    client.println("<div class='control-row'>");
+    client.println("<label>Strobe Interval:</label>");
+    client.println("<input type='range' id='strobeIntervalSlider' min='10' max='1000' value='100'>");
+    client.println("<span id='strobeIntervalValue'>100ms</span>");
+    client.println("<button class='btn-blue' onclick='sendStrobeInterval()'>Apply</button>");
+    client.println("</div>");
+
+    client.println("<div class='control-row'>");
+    client.println("<label>Strobe Flash Color:</label>");
+    client.println("<select id='strobeColorSelect'>");
+    client.println("<option value='0xFFFF'>White</option>");
+    client.println("<option value='0xF800'>Red</option>");
+    client.println("<option value='0x07E0'>Green</option>");
+    client.println("<option value='0x001F'>Blue</option>");
+    client.println("<option value='0xFFE0'>Yellow</option>");
+    client.println("<option value='0xF81F'>Magenta</option>");
+    client.println("<option value='0x07FF'>Cyan</option>");
+    client.println("<option value='0x0000'>Black</option>");
+    client.println("</select>");
+    client.println("<button class='btn-blue' onclick='sendStrobeColor()'>Apply</button>");
+    client.println("</div>");
+
+    client.println("</div>");
+
     client.println("</div>");
 
     // Status indicator
@@ -749,6 +798,11 @@ void serveImageUploadPage(WiFiClient& client) {
     client.println("  document.getElementById('speedValue').textContent = e.target.value + 'ms';");
     client.println("});");
 
+    // NEW: Strobe interval slider
+    client.println("document.getElementById('strobeIntervalSlider').addEventListener('input', (e) => {");
+    client.println("  document.getElementById('strobeIntervalValue').textContent = e.target.value + 'ms';");
+    client.println("});");
+
     // Generic setting sender
     client.println("function sendSetting(endpoint, data) {");
     client.println("  fetch(endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) })");
@@ -770,6 +824,10 @@ void serveImageUploadPage(WiFiClient& client) {
     client.println("function sendImageSpacing() { sendSetting('/setImageSpacing', { spacing: parseInt(document.getElementById('imageSpacingInput').value) }); }");
     client.println("function sendTextDirection() { sendSetting('/setTextDirection', { direction: parseInt(document.getElementById('textDirectionSelect').value) }); }");
     client.println("function sendImageDirection() { sendSetting('/setImageDirection', { direction: parseInt(document.getElementById('imageDirectionSelect').value) }); }");
+    client.println("function sendStrobe() { sendSetting('/setStrobe', { enabled: parseInt(document.getElementById('strobeSelect').value) }); }");
+    client.println("function sendStrobeInterval() { sendSetting('/setStrobeInterval', { interval: parseInt(document.getElementById('strobeIntervalSlider').value) }); }");
+    client.println("function sendStrobeColor() { sendSetting('/setStrobeColor', { color: parseInt(document.getElementById('strobeColorSelect').value) }); }");
+
 
     client.println("</script>");
     client.println("</body></html>");
@@ -1109,7 +1167,7 @@ else if (endpoint.indexOf("/setImgScroll") >= 0) {
             int newDirection = postData.substring(idx + 12).toInt();
             if (newDirection == -1 || newDirection == 1) {
                 textScrollDirection = newDirection;
-                
+
                 // Reset position based on new direction
                 if (textScrollDirection == -1) {  // Left
                     textX = MATRIX_WIDTH;  // Start from right edge
@@ -1121,7 +1179,7 @@ else if (endpoint.indexOf("/setImgScroll") >= 0) {
                     matrix.getTextBounds(scrollText.c_str(), 0, 0, &x1, &y1, &w, &h);
                     textX = -(int)w;  // Start completely off-screen to the left
                 }
-                
+
                 client.println(textScrollDirection == -1 ? "Text scrolling left!" : "Text scrolling right!");
                 Serial.print("Text direction: ");
                 Serial.println(textScrollDirection == -1 ? "LEFT" : "RIGHT");
@@ -1135,18 +1193,52 @@ else if (endpoint.indexOf("/setImgScroll") >= 0) {
             int newDirection = postData.substring(idx + 12).toInt();
             if (newDirection == -1 || newDirection == 1) {
                 imageScrollDirection = newDirection;
-                
+
                 // Reset position based on new direction
                 if (imageScrollDirection == -1) {  // Left
                     imageX = MATRIX_WIDTH;  // Start from right edge
                 } else {  // Right
                     imageX = -storedImageWidth;  // Start completely off-screen to the left
                 }
-                
+
                 client.println(imageScrollDirection == -1 ? "Image scrolling left!" : "Image scrolling right!");
                 Serial.print("Image direction: ");
                 Serial.println(imageScrollDirection == -1 ? "LEFT" : "RIGHT");
             }
+        }
+    }
+    // NEW: Strobe Enable/Disable
+    else if (endpoint.indexOf("/setStrobe") >= 0) {
+        int idx = postData.indexOf("\"enabled\":");
+        if (idx >= 0) {
+            strobeEnabled = postData.substring(idx + 10).toInt() != 0;
+            client.println(strobeEnabled ? "Strobe enabled!" : "Strobe disabled!");
+            Serial.print("Strobe: ");
+            Serial.println(strobeEnabled ? "ON" : "OFF");
+        }
+    }
+    // NEW: Strobe Interval
+    else if (endpoint.indexOf("/setStrobeInterval") >= 0) {
+        int idx = postData.indexOf("\"interval\":");
+        if (idx >= 0) {
+            int newInterval = postData.substring(idx + 11).toInt();
+            if (newInterval >= 10 && newInterval <= 1000) {
+                strobeInterval = newInterval;
+                client.println("Strobe interval updated!");
+                Serial.print("Strobe interval: ");
+                Serial.print(strobeInterval);
+                Serial.println("ms");
+            }
+        }
+    }
+    // NEW: Strobe Color
+    else if (endpoint.indexOf("/setStrobeColor") >= 0) {
+        int idx = postData.indexOf("\"color\":");
+        if (idx >= 0) {
+            strobeColor = postData.substring(idx + 8).toInt();
+            client.println("Strobe color updated!");
+            Serial.print("Strobe color: 0x");
+            Serial.println(strobeColor, HEX);
         }
     }
     else {
@@ -1334,7 +1426,8 @@ void connectWiFi() {
  * Checks for available UDP packets and processes
  * supported OSC commands.
  */
-void handleOSCMessages() {
+void handleOSCMessages()
+{
     if (WiFi.status() != WL_CONNECTED || !udpStarted) return;
 
     int packetSize = udp.parsePacket();
@@ -1473,7 +1566,7 @@ void handleOSCMessages() {
         int32_t direction = parseOSCInt(packetBuffer, len);
         if (direction == -1 || direction == 1) {
             textScrollDirection = direction;
-            
+
             // Reset position based on new direction
             if (textScrollDirection == -1) {  // Left
                 textX = MATRIX_WIDTH;  // Start from right edge
@@ -1485,7 +1578,7 @@ void handleOSCMessages() {
                 matrix.getTextBounds(scrollText.c_str(), 0, 0, &x1, &y1, &w, &h);
                 textX = -(int)w;  // Start completely off-screen to the left
             }
-            
+
             Serial.print("Text Direction: ");
             Serial.println(textScrollDirection == -1 ? "LEFT" : "RIGHT");
         }
@@ -1495,17 +1588,41 @@ void handleOSCMessages() {
         int32_t direction = parseOSCInt(packetBuffer, len);
         if (direction == -1 || direction == 1) {
             imageScrollDirection = direction;
-            
+
             // Reset position based on new direction
             if (imageScrollDirection == -1) {  // Left
                 imageX = MATRIX_WIDTH;  // Start from right edge
             } else {  // Right
                 imageX = -storedImageWidth;  // Start completely off-screen to the left
             }
-            
+
             Serial.print("Image Direction: ");
             Serial.println(imageScrollDirection == -1 ? "LEFT" : "RIGHT");
         }
+    }
+    // NEW: /strobe - toggle strobe effect
+    else if (strncmp(packetBuffer, "/strobe", 7) == 0) {
+        int32_t enable = parseOSCInt(packetBuffer, len);
+        strobeEnabled = (enable != 0);
+        Serial.print("Strobe: ");
+        Serial.println(strobeEnabled ? "ON" : "OFF");
+    }
+    // NEW: /strobeInterval - set strobe speed
+    else if (strncmp(packetBuffer, "/strobeInterval", 15) == 0) {
+        int32_t interval = parseOSCInt(packetBuffer, len);
+        if (interval >= 10 && interval <= 1000) {
+            strobeInterval = interval;
+            Serial.print("Strobe Interval: ");
+            Serial.print(strobeInterval);
+            Serial.println("ms");
+        }
+    }
+    // NEW: /strobeColor - set flash color
+    else if (strncmp(packetBuffer, "/strobeColor", 12) == 0) {
+        int32_t color = parseOSCInt(packetBuffer, len);
+        strobeColor = (uint16_t)color;
+        Serial.print("Strobe Color: 0x");
+        Serial.println(strobeColor, HEX);
     }
 }
 
@@ -1518,6 +1635,22 @@ void handleOSCMessages() {
  * @param currentTime Current millis() value for timing
  */
 void updateDisplay(unsigned long currentTime) {
+    // Handle strobe timing
+    if (strobeEnabled) {
+        if (currentTime - lastStrobeTime >= (unsigned long)strobeInterval) {
+            strobeState = !strobeState;
+            lastStrobeTime = currentTime;
+        }
+
+        // If strobe is in "flash" state, fill entire screen and return
+        if (strobeState) {
+            matrix.fillScreen(strobeColor);
+            matrix.show();
+            return;
+        }
+        // Otherwise continue with normal rendering (showing content)
+    }
+
     if (currentTime - lastScrollTime < (unsigned long)scrollDelay) return;
 
     lastScrollTime = currentTime;
