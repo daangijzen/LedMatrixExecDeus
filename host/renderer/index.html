@@ -3,166 +3,165 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LED Matrix Video Player</title>
+    <title>LED Matrix Display Controller</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="container">
-    <!-- Header -->
     <header>
-        <h1>🎬 LED Matrix Video Player</h1>
-        <div class="status-bar">
-            <div id="connection-status" class="status disconnected">
-                ⚫ Disconnected
-            </div>
-        </div>
+        <h1>🎨 LED Matrix Display Controller</h1>
+        <div id="connection-status" class="status disconnected">⚫ Disconnected</div>
     </header>
 
-    <!-- Main Content -->
-    <main class="video-layout">
+    <main>
+        <!-- Connection Panel -->
+        <section class="panel">
+            <h2>Connection</h2>
+            <div class="control-group">
+                <select id="port-select">
+                    <option value="">-- Select Port --</option>
+                </select>
+                <button id="refresh-ports" class="btn-icon" title="Refresh ports">🔄</button>
+            </div>
+            <div class="control-group">
+                <button id="connect-btn" class="btn-primary btn-block">Connect</button>
+                <button id="disconnect-btn" class="btn-danger btn-block" disabled>Disconnect</button>
+            </div>
+        </section>
 
-        <!-- Sidebar: Connection & Settings -->
-        <aside class="sidebar">
-            <!-- Connection -->
-            <section class="panel">
-                <h2>Connection</h2>
-                <div class="control-group">
-                    <select id="port-select">
-                        <option value="">-- Select Port --</option>
-                    </select>
-                    <button id="refresh-ports" class="btn-icon">🔄</button>
-                </div>
-                <div class="control-group">
-                    <button id="connect-btn" class="btn-primary btn-block">Connect</button>
-                    <button id="disconnect-btn" class="btn-danger btn-block" disabled>Disconnect</button>
-                </div>
-            </section>
+        <!-- Image/Video Display -->
+        <section class="panel">
+            <h2>Media Display</h2>
 
-            <!-- Video Info -->
-            <section class="panel">
-                <h2>Video Info</h2>
-                <div class="info-grid">
-                    <div class="info-item">
-                        <span class="label">File:</span>
-                        <span class="value" id="video-filename">No video loaded</span>
+            <div class="settings-group">
+                <label for="color-mode">Color Mode:</label>
+                <select id="color-mode">
+                    <option value="rgb565">RGB565 (Standard)</option>
+                    <option value="rgb565-dithered">RGB565 Dithered</option>
+                    <option value="gameboy">Game Boy (4 shades)</option>
+                    <option value="grayscale">Grayscale</option>
+                    <option value="sepia">Sepia Tone</option>
+                    <option value="highcontrast">High Contrast</option>
+                </select>
+            </div>
+
+            <div class="image-controls">
+                <button id="load-image-btn" class="btn-primary btn-block" disabled>
+                    📂 Load Media (Image/Video/GIF)
+                </button>
+
+                <canvas id="preview-canvas" width="192" height="32"></canvas>
+
+                <p class="image-info" id="image-info">No media loaded</p>
+
+                <!-- Playback Controls -->
+                <div id="playback-controls" style="display: none;">
+                    <div class="settings-group">
+                        <label for="fps-slider">Frame Rate: <span id="fps-value">12</span> FPS</label>
+                        <input type="range" id="fps-slider" min="5" max="20" value="12" step="1">
                     </div>
-                    <div class="info-item">
-                        <span class="label">Resolution:</span>
-                        <span class="value" id="video-resolution">-</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="label">Duration:</span>
-                        <span class="value" id="video-duration">-</span>
+
+                    <div class="control-group">
+                        <button id="play-btn" class="btn-success">▶ Play</button>
+                        <button id="pause-btn" class="btn-warning" disabled>⏸ Pause</button>
+                        <button id="stop-btn" class="btn-danger" disabled>⏹ Stop</button>
                     </div>
                 </div>
-            </section>
+            </div>
+        </section>
 
-            <!-- Color Mode -->
-            <section class="panel">
-                <h2>Color Mode</h2>
-                <div class="radio-group">
-                    <label>
-                        <input type="radio" name="colormode" value="4color" checked>
-                        4-Color (R, G, B, W)
-                    </label>
-                    <label>
-                        <input type="radio" name="colormode" value="7color">
-                        7-Color (RGB + mixes)
-                    </label>
-                    <label>
-                        <input type="radio" name="colormode" value="monochrome">
-                        Monochrome (B&W)
-                    </label>
-                </div>
+        <!-- Test Patterns (Moved Down) -->
+        <section class="panel">
+            <h2>Test Patterns</h2>
+            <div class="pattern-grid">
+                <button class="pattern-btn" data-pattern="0" disabled>
+                    <span class="icon">⚫</span>
+                    <span class="label">Blackout</span>
+                </button>
+                <button class="pattern-btn" data-pattern="1" disabled>
+                    <span class="icon">🌈</span>
+                    <span class="label">Rainbow</span>
+                </button>
+                <button class="pattern-btn" data-pattern="2" disabled>
+                    <span class="icon">📊</span>
+                    <span class="label">Moving Bars</span>
+                </button>
+                <button class="pattern-btn" data-pattern="3" disabled>
+                    <span class="icon">🎨</span>
+                    <span class="label">Solid Colors</span>
+                </button>
+            </div>
+            <button id="clear-btn" class="btn-danger btn-block" disabled>
+                🗑️ Clear Display
+            </button>
+        </section>
 
-                <div class="control-group" style="margin-top: 15px;">
-                    <label>Brightness Threshold:</label>
-                    <input type="range" id="brightness-threshold" min="0" max="255" value="128">
-                    <span id="threshold-value">128</span>
-                    <button id="reset-threshold-btn" class="btn-icon" title="Reset to 128">↻</button>
-                </div>
-            </section>
-
-            <!-- Playback Settings -->
-            <section class="panel">
-                <h2>Playback</h2>
-
-                <div class="control-group">
-                    <label>Target FPS:</label>
-                    <input type="range" id="target-fps" min="12" max="24" step="1" value="24">
-                    <span id="fps-value">24</span>
-                </div>
-
-                <div class="control-group">
-                    <label>Speed:</label>
-                    <input type="range" id="playback-speed" min="0.25" max="2" step="0.25" value="1">
-                    <span id="speed-value">1.0x</span>
-                </div>
-
-                <div class="control-group">
-                    <label>
-                        <input type="checkbox" id="loop-enabled" checked>
-                        Loop video
-                    </label>
-                </div>
-            </section>
-
-            <!-- Quick Actions -->
-            <section class="panel">
-                <h2>Quick Actions</h2>
-                <button id="blackout-btn" class="btn-danger btn-block" disabled>⚫ Blackout</button>
-            </section>
-        </aside>
-
-        <!-- Main Area: Video Player -->
-        <div class="main-content">
-            <!-- Video Canvas -->
-            <div class="preview-container">
-                <div class="preview-box">
-                    <h3>Original Colors</h3>
-                    <video id="video-player" crossorigin="anonymous" style="display:none;"></video>
-                    <canvas id="video-canvas-original" width="192" height="32"></canvas>
-                </div>
-
-                <div class="preview-box">
-                    <h3>RGB565 (Matrix Output)</h3>
-                    <canvas id="video-canvas" width="192" height="32"></canvas>
-                </div>
-
-                <div id="no-video-message">
-                    <p>📂 No video loaded</p>
-                    <p><small>Click "Load Video" to get started</small></p>
-                </div>
+        <!-- Serial Commands Panel (Moved Down) -->
+        <section class="panel">
+            <h2>Debug Commands</h2>
+            <div class="command-grid">
+                <button class="cmd-btn" data-command="0" disabled title="Command: 0">
+                    <span class="cmd-label">Blackout</span>
+                    <span class="cmd-code">0</span>
+                </button>
+                <button class="cmd-btn" data-command="1" disabled title="Command: 1">
+                    <span class="cmd-label">Rainbow</span>
+                    <span class="cmd-code">1</span>
+                </button>
+                <button class="cmd-btn" data-command="2" disabled title="Command: 2">
+                    <span class="cmd-label">Moving Bars</span>
+                    <span class="cmd-code">2</span>
+                </button>
+                <button class="cmd-btn" data-command="3" disabled title="Command: 3">
+                    <span class="cmd-label">Solid Colors</span>
+                    <span class="cmd-code">3</span>
+                </button>
+                <button class="cmd-btn" data-command="C" disabled title="Command: C">
+                    <span class="cmd-label">Clear Display</span>
+                    <span class="cmd-code">C</span>
+                </button>
+                <button class="cmd-btn" data-command="I" disabled title="Command: I">
+                    <span class="cmd-label">Image Mode</span>
+                    <span class="cmd-code">I</span>
+                </button>
+                <button class="cmd-btn" data-command="V" disabled title="Command: V">
+                    <span class="cmd-label">Video Mode</span>
+                    <span class="cmd-code">V</span>
+                </button>
+                <button class="cmd-btn" data-command="S" disabled title="Command: S">
+                    <span class="cmd-label">Stop Video</span>
+                    <span class="cmd-code">S</span>
+                </button>
+                <button class="cmd-btn" data-command="P" disabled title="Command: P">
+                    <span class="cmd-label">Ping</span>
+                    <span class="cmd-code">P</span>
+                </button>
             </div>
 
-            <!-- Controls -->
-            <div class="controls-panel">
-                <button id="load-video-btn" class="btn-primary">📂 Load Video</button>
-
-                <div class="playback-controls">
-                    <button id="play-btn" class="btn-control" disabled>▶️ Play</button>
-                    <button id="pause-btn" class="btn-control" disabled>⏸️ Pause</button>
-                    <button id="stop-btn" class="btn-control" disabled>⏹️ Stop</button>
-                </div>
-
-                <button id="stream-btn" class="btn-success" disabled>🚀 Stream to Matrix</button>
+            <!-- Custom Command -->
+            <div class="custom-command">
+                <input type="text" id="custom-cmd-input" placeholder="Custom command" maxlength="1" disabled>
+                <button id="send-custom-cmd" class="btn-primary" disabled>Send</button>
             </div>
+        </section>
 
-            <!-- Timeline -->
-            <div class="timeline-panel">
-                <input type="range" id="timeline-slider" min="0" max="100" value="0" disabled>
-                <div class="time-display">
-                    <span id="current-time">00:00</span>
-                    <span>/</span>
-                    <span id="total-time">00:00</span>
-                </div>
+        <!-- Serial Monitor -->
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Serial Monitor</h2>
+                <button id="clear-console" class="btn-icon" title="Clear console">🗑️</button>
             </div>
+            <div id="serial-console" class="serial-console"></div>
+            <div class="console-stats">
+                <span id="console-lines">Lines: 0</span>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="auto-scroll" checked>
+                    Auto-scroll
+                </label>
+            </div>
+        </section>
 
-            <!-- Status -->
-            <div id="player-status" class="player-status">
-                Ready
-            </div>
-        </div>
+        <div id="status-message" class="status-message">Ready</div>
     </main>
 </div>
 
