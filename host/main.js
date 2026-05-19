@@ -113,7 +113,8 @@ async function connectToPort(portPath) {
         serialPort = new SerialPort({
             path: portPath,
             baudRate: 921600,
-            autoOpen: false
+            autoOpen: false,
+            highWaterMark: 16384
         });
 
         return new Promise((resolve, reject) => {

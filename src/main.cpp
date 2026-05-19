@@ -26,7 +26,7 @@
 #define MATRIX_WIDTH  192
 #define MATRIX_HEIGHT 32
 #define FRAME_SIZE (MATRIX_WIDTH * MATRIX_HEIGHT * 2)  // RGB565 = 2 bytes per pixel
-#define SERIAL_BUFFER_SIZE 4096  // Larger buffer for faster transfers
+#define SERIAL_BUFFER_SIZE 16384  // Larger buffer for faster transfers
 
 // Matrix Portal S3 Pin Configuration
 uint8_t rgbPins[]  = {42, 41, 40, 38, 39, 37};  // R1, G1, B1, R2, G2, B2
@@ -38,7 +38,7 @@ uint8_t oePin    = 14;
 // Matrix initialization: 192x32 display (3x 64x32 panels)
 Adafruit_Protomatter matrix(
     MATRIX_WIDTH,  // Full width (192 pixels)
-    2,             // Bit depth (4 = 16 brightness levels)
+    3,             // Bit depth (4 = 16 brightness levels)
     1,             // 1 tile (treat all 3 panels as one continuous display)
     rgbPins,
     4,             // 4 address pins
