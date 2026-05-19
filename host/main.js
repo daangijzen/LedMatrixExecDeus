@@ -1,114 +1,95 @@
 ﻿/**
- * LED Matrix Display Controller - Electron Main Process
- * Supports images, videos, and GIFs
+ * LED Matrix Video Player - Main Process (Streamlined)
  */
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const fs = require('fs');
 const { SerialPort } = require('serialport');
 
 let mainWindow;
 let serialPort = null;
 let isConnected = false;
-let reconnectTimer = null;
 let currentPortPath = null;
 
 const MATRIX_WIDTH = 192;
 const MATRIX_HEIGHT = 32;
 const FRAME_SIZE = MATRIX_WIDTH * MATRIX_HEIGHT * 2;
 
-// Video streaming state
 let videoStreaming = false;
-let streamingInterval = null;
+let serialLineBuffer = '';
 
 /* ==============================================================================
- * WINDOW MANAGEMENT
+ * WINDOW
  * ============================================================================== */
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 800,
+        width: 600,
         height: 700,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         },
-        title: 'LED Matrix Display Controller',
+        title: 'LED Matrix Video Player',
         backgroundColor: '#1a1a2e'
     });
-
     mainWindow.loadFile('renderer/index.html');
-
-    // Optional: Open DevTools in development
-    // mainWindow.webContents.openDevTools();
 }
 
 app.whenReady().then(createWindow);
-
 app.on('window-all-closed', () => {
     cleanup();
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
+    if (process.platform !== 'darwin') app.quit();
 });
-
 app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
 /* ==============================================================================
- * SERIAL PORT MANAGEMENT
+ * UTILITIES
  * ============================================================================== */
 
-function cleanup() {
-    if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
+function sendToWindow(channel, data) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(channel, data);
     }
-    if (streamingInterval) {
-        clearInterval(streamingInterval);
-        streamingInterval = null;
-    }
-    if (serialPort && serialPort.isOpen) {
-        serialPort.close();
-    }
-    videoStreaming = false;
 }
 
-async function attemptReconnect() {
-    if (!currentPortPath || isConnected) return;
-
-    console.log('🔄 Attempting to reconnect to', currentPortPath);
-
-    try {
-        const ports = await SerialPort.list();
-        const portExists = ports.some(p => p.path === currentPortPath);
-
-        if (portExists) {
-            const result = await connectToPort(currentPortPath);
-            if (result.success) {
-                console.log('✅ Reconnected successfully');
-                mainWindow.webContents.send('connection-restored');
-                return;
-            }
+function writeToPort(data) {
+    return new Promise((resolve, reject) => {
+        if (!serialPort?.isOpen) {
+            reject(new Error('Port not open'));
+            return;
         }
-    } catch (error) {
-        console.error('Reconnect attempt failed:', error);
+        serialPort.write(data, err => err ? reject(err) : resolve());
+    });
+}
+
+/* ==============================================================================
+ * SERIAL HANDLING
+ * ============================================================================== */
+
+function handleSerialLine(line) {
+    if (!line) return;
+
+    // 'R' = ESP32 ready for next frame
+    if (line === 'R') {
+        sendToWindow('esp32-ready');
     }
 
-    // Schedule next attempt
-    reconnectTimer = setTimeout(attemptReconnect, 2000);
+    console.log('📥', line);
+    sendToWindow('serial-data', line);
 }
 
 async function connectToPort(portPath) {
     try {
-        if (serialPort && serialPort.isOpen) {
-            await serialPort.close();
+        if (serialPort) {
+            serialPort.removeAllListeners();
+            if (serialPort.isOpen) await new Promise(r => serialPort.close(r));
+            serialPort = null;
         }
+        serialLineBuffer = '';
 
         serialPort = new SerialPort({
             path: portPath,
@@ -117,306 +98,165 @@ async function connectToPort(portPath) {
             highWaterMark: 16384
         });
 
-        return new Promise((resolve, reject) => {
-            serialPort.open((err) => {
+        return new Promise(resolve => {
+            serialPort.open(err => {
                 if (err) {
                     isConnected = false;
-                    reject({ success: false, error: err.message });
+                    resolve({ success: false, error: err.message });
                     return;
                 }
 
                 isConnected = true;
                 currentPortPath = portPath;
 
-                // Set up error handling
-                serialPort.on('error', (error) => {
-                    console.error('❌ Serial port error:', error);
+                serialPort.on('error', error => {
+                    console.error('❌ Serial error:', error);
                     isConnected = false;
-                    mainWindow.webContents.send('connection-lost');
-                    attemptReconnect();
+                    sendToWindow('connection-lost');
                 });
 
                 serialPort.on('close', () => {
                     console.log('🔌 Port closed');
                     isConnected = false;
-                    mainWindow.webContents.send('connection-lost');
-                    if (currentPortPath) {
-                        attemptReconnect();
+                    sendToWindow('connection-lost');
+                });
+
+                serialPort.on('data', data => {
+                    const raw = data.toString('latin1');
+                    for (let i = 0; i < raw.length; i++) {
+                        const ch = raw[i];
+                        if (ch === '\n') {
+                            const line = serialLineBuffer.trim();
+                            serialLineBuffer = '';
+                            if (line) handleSerialLine(line);
+                        } else if (ch === '\r') {
+                            // skip
+                        } else {
+                            serialLineBuffer += ch;
+                            // Handle bare 'R' byte
+                            if (serialLineBuffer === 'R') {
+                                const next = raw[i + 1];
+                                if (next === undefined || next === '\n' || next === '\r') {
+                                    handleSerialLine('R');
+                                    serialLineBuffer = '';
+                                }
+                            }
+                        }
                     }
                 });
 
-                // Set up data handler for responses
-                serialPort.on('data', (data) => {
-                    const response = data.toString().trim();
-                    console.log('📥', response);
-                    mainWindow.webContents.send('serial-data', response);
-                });
-
                 console.log('✅ Connected to', portPath);
-
-                // Send ping to verify connection
-                setTimeout(() => {
-                    serialPort.write('P');
-                }, 200);
-
                 resolve({ success: true, port: portPath });
             });
         });
-    } catch (error) {
-        return { success: false, error: error.message };
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 }
 
-async function sendCommandWithAck(command, timeoutMs = 1000) {
-    if (!serialPort || !serialPort.isOpen) {
-        throw new Error('Not connected');
+function cleanup() {
+    videoStreaming = false;
+    if (serialPort?.isOpen) {
+        try { serialPort.close(); } catch (_) {}
     }
-
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            serialPort.removeListener('data', handler);
-            reject(new Error('Command timeout'));
-        }, timeoutMs);
-
-        const handler = (data) => {
-            const response = data.toString().trim();
-            if (response.startsWith('OK:') || response.startsWith('ERROR:')) {
-                clearTimeout(timeout);
-                serialPort.removeListener('data', handler);
-
-                if (response.startsWith('ERROR:')) {
-                    reject(new Error(response));
-                } else {
-                    resolve(response);
-                }
-            }
-        };
-
-        serialPort.on('data', handler);
-        serialPort.write(command);
-    });
 }
 
 /* ==============================================================================
- * IPC HANDLERS - CONNECTION
+ * IPC HANDLERS
  * ============================================================================== */
 
 ipcMain.handle('get-ports', async () => {
     try {
-        const ports = await SerialPort.list();
-        console.log('📋 Available ports:', ports.length);
-        return ports.map(port => ({
-            path: port.path,
-            manufacturer: port.manufacturer || '',
-            vendorId: port.vendorId,
-            productId: port.productId
+        return (await SerialPort.list()).map(p => ({
+            path: p.path,
+            manufacturer: p.manufacturer || ''
         }));
-    } catch (error) {
-        console.error('Error listing ports:', error);
+    } catch {
         return [];
     }
 });
 
-ipcMain.handle('connect', async (event, portPath) => {
+ipcMain.handle('connect', async (_e, portPath) => {
     try {
-        const result = await connectToPort(portPath);
-        return result;
-    } catch (error) {
-        return { success: false, error: error.message };
+        return await connectToPort(portPath);
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 });
 
 ipcMain.handle('disconnect', async () => {
     try {
+        videoStreaming = false;
+        if (serialPort) {
+            serialPort.removeAllListeners();
+            if (serialPort.isOpen) await new Promise(r => serialPort.close(r));
+            serialPort = null;
+        }
+        isConnected = false;
         currentPortPath = null;
-        if (reconnectTimer) {
-            clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-        }
-        if (serialPort && serialPort.isOpen) {
-            await serialPort.close();
-            isConnected = false;
-        }
         return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 });
 
-/* ==============================================================================
- * IPC HANDLERS - COMMANDS
- * ============================================================================== */
-
-ipcMain.handle('send-pattern', async (event, patternNum) => {
-    if (!serialPort || !serialPort.isOpen) {
-        return { success: false, error: 'Not connected' };
-    }
-
+ipcMain.handle('send-command', async (_e, command) => {
+    if (!serialPort?.isOpen) return { success: false, error: 'Not connected' };
     try {
-        await sendCommandWithAck(patternNum.toString());
+        await writeToPort(command);
         return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 });
-
-ipcMain.handle('clear-display', async () => {
-    if (!serialPort || !serialPort.isOpen) {
-        return { success: false, error: 'Not connected' };
-    }
-
-    try {
-        await sendCommandWithAck('C');
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('send-raw-command', async (event, command) => {
-    if (!serialPort || !serialPort.isOpen) {
-        return { success: false, error: 'Not connected' };
-    }
-
-    try {
-        serialPort.write(command);
-        console.log('📤 Sent raw command:', command);
-        return { success: true };
-    } catch (error) {
-        console.error('Error sending raw command:', error);
-        return { success: false, error: error.message };
-    }
-});
-
-/* ==============================================================================
- * IPC HANDLERS - IMAGE
- * ============================================================================== */
-
-ipcMain.handle('open-image-file', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openFile'],
-        filters: [
-            { name: 'All Media', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp', 'mp4', 'webm', 'mov', 'avi'] },
-            { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'] },
-            { name: 'Videos', extensions: ['mp4', 'webm', 'mov', 'avi'] }
-        ]
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-        return { success: true, path: result.filePaths[0] };
-    }
-    return { success: false };
-});
-
-ipcMain.handle('send-image', async (event, imageData) => {
-    if (!serialPort || !serialPort.isOpen) {
-        return { success: false, error: 'Not connected' };
-    }
-
-    try {
-        console.log('📤 Sending image upload command...');
-
-        // Send 'I' command and wait for ready
-        await sendCommandWithAck('I', 2000);
-
-        // Convert imageData array to buffer (little-endian RGB565)
-        const buffer = Buffer.allocUnsafe(FRAME_SIZE);
-        for (let i = 0; i < imageData.length; i++) {
-            buffer.writeUInt16LE(imageData[i], i * 2);
-        }
-
-        console.log('📤 Sending image data:', buffer.length, 'bytes');
-
-        // Send the image data in chunks
-        const chunkSize = 1024;
-        for (let i = 0; i < buffer.length; i += chunkSize) {
-            const chunk = buffer.slice(i, Math.min(i + chunkSize, buffer.length));
-            await new Promise((resolve, reject) => {
-                serialPort.write(chunk, (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            });
-            await new Promise(resolve => setTimeout(resolve, 10));
-        }
-
-        // Wait for confirmation
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        console.log('✅ Image sent successfully');
-        return { success: true };
-    } catch (error) {
-        console.error('❌ Error sending image:', error);
-        return { success: false, error: error.message };
-    }
-});
-
-/* ==============================================================================
- * IPC HANDLERS - VIDEO
- * ============================================================================== */
 
 ipcMain.handle('start-video-mode', async () => {
-    if (!serialPort || !serialPort.isOpen) {
-        return { success: false, error: 'Not connected' };
-    }
-
+    if (!serialPort?.isOpen) return { success: false, error: 'Not connected' };
     try {
-        await sendCommandWithAck('V', 2000);
+        await writeToPort('V');
         videoStreaming = true;
+        // Wait for OK response
+        await new Promise(r => setTimeout(r, 100));
         return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('send-frame', async (event, frameData) => {
-    if (!serialPort || !serialPort.isOpen || !videoStreaming) {
-        return { success: false, error: 'Not in video mode' };
-    }
-
-    try {
-        // Send 'F' command WITHOUT waiting for ACK
-        serialPort.write('F');
-
-        // Small delay to let ESP32 process the command
-        await new Promise(resolve => setTimeout(resolve, 5));
-
-        // Send frame data
-        const buffer = Buffer.allocUnsafe(FRAME_SIZE);
-        for (let i = 0; i < frameData.length; i++) {
-            buffer.writeUInt16LE(frameData[i], i * 2);
-        }
-
-        // Send in larger chunks for speed
-        const chunkSize = 2048;  // Increased from 1024
-        for (let i = 0; i < buffer.length; i += chunkSize) {
-            const chunk = buffer.slice(i, Math.min(i + chunkSize, buffer.length));
-            await new Promise((resolve, reject) => {
-                serialPort.write(chunk, (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            });
-            // Tiny delay between chunks
-            await new Promise(resolve => setImmediate(resolve));
-        }
-
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 });
 
 ipcMain.handle('stop-video-mode', async () => {
-    if (!serialPort || !serialPort.isOpen) {
-        return { success: false, error: 'Not connected' };
-    }
-
+    videoStreaming = false;
+    if (!serialPort?.isOpen) return { success: true };
     try {
-        videoStreaming = false;
-        await sendCommandWithAck('S');
+        await writeToPort('S');
+        await new Promise(r => setTimeout(r, 50));
+    } catch (e) {
+        console.warn('stop-video-mode:', e.message);
+    }
+    return { success: true };
+});
+
+ipcMain.handle('send-frame', async (_e, frameData) => {
+    if (!videoStreaming || !serialPort?.isOpen) {
+        return { success: false, error: 'Not streaming' };
+    }
+    try {
+        const buf = Buffer.allocUnsafe(FRAME_SIZE);
+        for (let i = 0; i < frameData.length; i++) {
+            buf.writeUInt16LE(frameData[i], i * 2);
+        }
+
+        await writeToPort('F');
+
+        // Send frame data in chunks
+        const chunkSize = 2048;
+        for (let i = 0; i < buf.length; i += chunkSize) {
+            await writeToPort(buf.slice(i, Math.min(i + chunkSize, buf.length)));
+            await new Promise(r => setImmediate(r));
+        }
+
         return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
+    } catch (e) {
+        console.error('send-frame error:', e);
+        return { success: false, error: e.message };
     }
 });
