@@ -1,5 +1,5 @@
 ﻿/**
- * LED Matrix Video Player - Frontend (Streamlined)
+ * LED Matrix Video Player - Frontend with Live Streaming + YouTube
  */
 
 let isConnected = false;
@@ -13,6 +13,7 @@ const MATRIX_HEIGHT = 32;
 let videoElement = null;
 let isPlaying = false;
 let streamActive = false;
+let streamSource = null; // 'file', 'url', 'webcam', 'screen', 'youtube'
 
 /* ==============================================================================
  * INIT
@@ -37,7 +38,16 @@ function setupEventListeners() {
     document.getElementById('test-pattern-btn').addEventListener('click', () => sendCommand('T'));
     document.getElementById('clear-btn').addEventListener('click', () => sendCommand('C'));
 
-    document.getElementById('load-video-btn').addEventListener('click', loadVideo);
+    document.getElementById('load-video-btn').addEventListener('click', loadVideoFile);
+    document.getElementById('load-url-btn').addEventListener('click', loadFromURL);
+    document.getElementById('load-webcam-btn').addEventListener('click', loadWebcam);
+    document.getElementById('load-screen-btn').addEventListener('click', loadScreenCapture);
+
+    // Allow Enter key to load URL
+    document.getElementById('url-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') loadFromURL();
+    });
+
     document.getElementById('play-btn').addEventListener('click', playVideo);
     document.getElementById('stop-btn').addEventListener('click', stopVideo);
 
@@ -131,10 +141,10 @@ async function sendCommand(cmd) {
 }
 
 /* ==============================================================================
- * VIDEO HANDLING
+ * VIDEO SOURCE LOADING
  * ============================================================================== */
 
-async function loadVideo() {
+async function loadVideoFile() {
     if (!isConnected) {
         alert('Not connected');
         return;
@@ -148,34 +158,245 @@ async function loadVideo() {
         const file = e.target.files[0];
         if (!file) return;
 
-        setStatus('Loading video...', 'info');
+        await setupVideoElement(URL.createObjectURL(file), 'file', file.name);
+    };
+
+    input.click();
+}
+
+async function loadFromURL() {
+    if (!isConnected) {
+        alert('Not connected');
+        return;
+    }
+
+    const urlInput = document.getElementById('url-input');
+    const url = urlInput.value.trim();
+
+    if (!url) {
+        alert('Please enter a URL or YouTube link');
+        return;
+    }
+
+    // Check if it's a YouTube URL
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        await loadYouTube(url);
+    } else {
+        // Try to load as direct video URL
+        await setupVideoElement(url, 'url', url);
+    }
+}
+
+async function loadYouTube(input) {
+    // Extract video ID from various YouTube URL formats
+    let videoId = input;
+
+    // Full URL: youtube.com/watch?v=ID
+    const match1 = input.match(/[?&]v=([^&]+)/);
+    if (match1) videoId = match1[1];
+
+    // Short URL: youtu.be/ID
+    const match2 = input.match(/youtu\.be\/([^?]+)/);
+    if (match2) videoId = match2[1];
+
+    // Embed URL: youtube.com/embed/ID
+    const match3 = input.match(/embed\/([^?]+)/);
+    if (match3) videoId = match3[1];
+
+    // Clean up any trailing parameters
+    videoId = videoId.split('&')[0].split('?')[0];
+
+    setStatus('Loading YouTube video...', 'info');
+    log(`Loading YouTube video ID: ${videoId}`);
+
+    try {
+        await setupYouTubePlayer(videoId);
+    } catch (e) {
+        alert('Failed to load YouTube video:\n' + e.message + '\n\nTip: Try using Screen Capture and capture a YouTube tab instead!');
+        log('YouTube error: ' + e.message);
+    }
+}
+
+async function setupYouTubePlayer(videoId) {
+    // Note: Due to browser security restrictions, we can't directly capture YouTube iframes
+    // The best approach is to use Screen Capture feature
+
+    alert(
+        'YouTube Direct Playback:\n\n' +
+        'Due to browser security restrictions, direct YouTube playback is limited.\n\n' +
+        'RECOMMENDED METHOD:\n' +
+        '1. Open YouTube video in browser\n' +
+        '2. Click "🖥️ Screen Capture" button\n' +
+        '3. Select the browser tab with YouTube\n' +
+        '4. Click Play!\n\n' +
+        'This gives you full quality and control!'
+    );
+
+    // Clear the URL input
+    document.getElementById('url-input').value = '';
+
+    throw new Error('Use Screen Capture for YouTube');
+}
+
+async function loadWebcam() {
+    if (!isConnected) {
+        alert('Not connected');
+        return;
+    }
+
+    try {
+        setStatus('Requesting webcam access...', 'info');
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 }
+            },
+            audio: false
+        });
 
         if (videoElement?.pause) {
             videoElement.pause();
-            videoElement.src = '';
+            if (videoElement.srcObject) {
+                videoElement.srcObject.getTracks().forEach(track => track.stop());
+            }
         }
 
         videoElement = document.createElement('video');
-        videoElement.src = URL.createObjectURL(file);
-        videoElement.loop = true;
+        videoElement.srcObject = stream;
         videoElement.muted = true;
         videoElement.playsInline = true;
 
         await new Promise((resolve, reject) => {
             videoElement.onloadedmetadata = () => {
+                streamSource = 'webcam';
                 document.getElementById('video-info').textContent =
-                    `${videoElement.videoWidth}x${videoElement.videoHeight}, ${videoElement.duration.toFixed(1)}s`;
+                    `Webcam: ${videoElement.videoWidth}x${videoElement.videoHeight}`;
                 document.getElementById('playback-controls').style.display = 'flex';
-                setStatus('Video loaded — press Play', 'success');
-                log(`Video loaded: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                setStatus('Webcam ready — press Play', 'success');
+                log(`Webcam loaded: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
                 resolve();
             };
-            videoElement.onerror = () => reject(new Error('Failed to load video'));
+            videoElement.onerror = () => reject(new Error('Failed to load webcam'));
         });
-    };
 
-    input.click();
+    } catch (e) {
+        alert('Webcam access denied or unavailable:\n' + e.message);
+        log('Webcam error: ' + e.message);
+    }
 }
+
+async function loadScreenCapture() {
+    if (!isConnected) {
+        alert('Not connected');
+        return;
+    }
+
+    try {
+        setStatus('Select screen or window to capture...', 'info');
+
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                frameRate: { ideal: 30 }
+            },
+            audio: false
+        });
+
+        if (videoElement?.pause) {
+            videoElement.pause();
+            if (videoElement.srcObject) {
+                videoElement.srcObject.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        videoElement = document.createElement('video');
+        videoElement.srcObject = stream;
+        videoElement.muted = true;
+        videoElement.playsInline = true;
+
+        await new Promise((resolve, reject) => {
+            videoElement.onloadedmetadata = () => {
+                streamSource = 'screen';
+                document.getElementById('video-info').textContent =
+                    `Screen Capture: ${videoElement.videoWidth}x${videoElement.videoHeight}`;
+                document.getElementById('playback-controls').style.display = 'flex';
+                setStatus('Screen capture ready — press Play', 'success');
+                log(`Screen capture: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                resolve();
+            };
+            videoElement.onerror = () => reject(new Error('Failed to capture screen'));
+        });
+
+    } catch (e) {
+        alert('Screen capture cancelled or unavailable:\n' + e.message);
+        log('Screen capture error: ' + e.message);
+    }
+}
+
+async function setupVideoElement(src, source, name) {
+    setStatus('Loading video...', 'info');
+
+    if (videoElement?.pause) {
+        videoElement.pause();
+        if (videoElement.srcObject) {
+            videoElement.srcObject.getTracks().forEach(track => track.stop());
+        }
+        videoElement.src = '';
+    }
+
+    videoElement = document.createElement('video');
+    videoElement.src = src;
+    videoElement.loop = (source === 'file');
+    videoElement.muted = true;
+    videoElement.playsInline = true;
+    videoElement.crossOrigin = 'anonymous';
+
+    await new Promise((resolve, reject) => {
+        videoElement.onloadedmetadata = () => {
+            streamSource = source;
+            const duration = videoElement.duration !== Infinity ?
+                `, ${videoElement.duration.toFixed(1)}s` : '';
+            document.getElementById('video-info').textContent =
+                `${name}\n${videoElement.videoWidth}x${videoElement.videoHeight}${duration}`;
+            document.getElementById('playback-controls').style.display = 'flex';
+            setStatus('Video loaded — press Play', 'success');
+            log(`Video loaded: ${videoElement.videoWidth}x${videoElement.videoHeight} (${source})`);
+
+            // Clear URL input on success
+            document.getElementById('url-input').value = '';
+
+            resolve();
+        };
+        videoElement.onerror = () => {
+            let errorMsg = 'Failed to load video';
+            if (videoElement.error) {
+                switch (videoElement.error.code) {
+                    case MediaError.MEDIA_ERR_NETWORK:
+                        errorMsg = 'Network error - check URL or connection';
+                        break;
+                    case MediaError.MEDIA_ERR_DECODE:
+                        errorMsg = 'Decode error - unsupported format';
+                        break;
+                    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                        errorMsg = 'Source not supported - try a direct video URL (.mp4, .webm)';
+                        break;
+                }
+            }
+            reject(new Error(errorMsg));
+        };
+    }).catch(e => {
+        alert(e.message);
+        log('Load error: ' + e.message);
+        throw e;
+    });
+}
+
+/* ==============================================================================
+ * PLAYBACK
+ * ============================================================================== */
 
 async function playVideo() {
     if (!videoElement || !isConnected) return;
@@ -197,7 +418,7 @@ async function playVideo() {
 
         if (videoElement.play) await videoElement.play();
 
-        setStatus('Playing video', 'success');
+        setStatus(`Playing ${streamSource}`, 'success');
         log('Playback started');
 
         // Kick off first frame
@@ -218,8 +439,15 @@ async function stopVideo() {
     if (videoElement) {
         if (videoElement.pause) {
             videoElement.pause();
-            videoElement.currentTime = 0;
+            if (streamSource !== 'file') {
+                videoElement.currentTime = 0;
+            }
         }
+
+        if (videoElement.srcObject) {
+            videoElement.srcObject.getTracks().forEach(track => track.stop());
+        }
+
         videoElement = null;
     }
 
@@ -279,6 +507,10 @@ function updateUI() {
     document.getElementById('test-pattern-btn').disabled = !on;
     document.getElementById('clear-btn').disabled = !on;
     document.getElementById('load-video-btn').disabled = !on;
+    document.getElementById('load-webcam-btn').disabled = !on;
+    document.getElementById('load-screen-btn').disabled = !on;
+    document.getElementById('url-input').disabled = !on;
+    document.getElementById('load-url-btn').disabled = !on;
 }
 
 function setStatus(msg, type = 'info') {

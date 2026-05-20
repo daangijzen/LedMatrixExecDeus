@@ -29,13 +29,42 @@
             </div>
         </section>
 
+        <!-- Video Sources -->
+        <section class="panel">
+            <h2>Video Source</h2>
+
+            <!-- URL Input -->
+            <div class="url-input-group">
+                <input
+                        type="text"
+                        id="url-input"
+                        placeholder="Enter URL or YouTube link..."
+                        disabled
+                />
+                <button id="load-url-btn" class="btn-primary" disabled>
+                    Load
+                </button>
+            </div>
+
+            <!-- Other Sources -->
+            <div class="source-grid">
+                <button id="load-video-btn" class="btn-primary" disabled>
+                    📁 Local File
+                </button>
+                <button id="load-webcam-btn" class="btn-primary" disabled>
+                    📹 Webcam
+                </button>
+                <button id="load-screen-btn" class="btn-primary" disabled>
+                    🖥️ Screen Capture
+                </button>
+            </div>
+        </section>
+
         <!-- Video Player -->
         <section class="panel">
-            <h2>Video Playback</h2>
+            <h2>Playback</h2>
             <canvas id="preview-canvas" width="192" height="32"></canvas>
             <p id="video-info">No video loaded</p>
-
-            <button id="load-video-btn" class="btn-primary btn-block" disabled>📂 Load Video</button>
 
             <div id="playback-controls" style="display: none;">
                 <div class="control-group">
