@@ -1,5 +1,5 @@
 ﻿/**
- * LED Matrix Video Player - Frontend (Streamlined)
+ * LED Matrix Video Player - Frontend (Museum Edition)
  */
 
 let isConnected = false;
@@ -13,16 +13,23 @@ const MATRIX_HEIGHT = 32;
 let videoElement = null;
 let isPlaying = false;
 let streamActive = false;
+let autoplayConfig = null;
 
 /* ==============================================================================
  * INIT
  * ============================================================================== */
 
 document.addEventListener('DOMContentLoaded', async () => {
+    autoplayConfig = await window.electronAPI.getAutoplayConfig();
+
     await refreshPorts();
     setupEventListeners();
     updateUI();
     log('System ready');
+
+    if (autoplayConfig?.enabled) {
+        setStatus('Autoplay mode enabled - waiting for device...', 'info');
+    }
 });
 
 /* ==============================================================================
@@ -52,12 +59,47 @@ function setupEventListeners() {
         isPlaying = false;
         streamActive = false;
         updateUI();
-        setStatus('Connection lost', 'error');
+        setStatus('Connection lost - attempting reconnect...', 'error');
     });
 
     window.electronAPI.onSerialData((data) => {
-        console.log('RX:', data);
-        addLog(data);
+        console.log('ESP32:', data);
+    });
+
+    // Autoplay events
+    window.electronAPI.onAutoplayStatus((data) => {
+        console.log('Autoplay:', data.status, data.message);
+        setStatus(data.message, data.status === 'error' ? 'error' : 'info');
+
+        if (data.status === 'connected') {
+            isConnected = true;
+            updateUI();
+        }
+    });
+
+    window.electronAPI.onAutoplayLoadVideo((data) => {
+        console.log('Auto-loading video:', data.path);
+        loadVideoFromPath(data.path);
+    });
+
+    window.electronAPI.onAutoplayResume(() => {
+        console.log('Auto-resuming playback');
+        if (videoElement && !isPlaying) {
+            setTimeout(() => playVideo(), 1000);
+        }
+    });
+
+    // NEW: Auto-select port in UI when connected
+    window.electronAPI.onPortSelected((data) => {
+        const portSelect = document.getElementById('port-select');
+        // Find and select the option
+        for (let i = 0; i < portSelect.options.length; i++) {
+            if (portSelect.options[i].value === data.path) {
+                portSelect.selectedIndex = i;
+                console.log('✓ Port auto-selected in UI:', data.path);
+                break;
+            }
+        }
     });
 }
 
@@ -148,19 +190,28 @@ async function loadVideo() {
         const file = e.target.files[0];
         if (!file) return;
 
-        setStatus('Loading video...', 'info');
+        const url = URL.createObjectURL(file);
+        await loadVideoFromPath(url);
+    };
 
-        if (videoElement?.pause) {
-            videoElement.pause();
-            videoElement.src = '';
-        }
+    input.click();
+}
 
-        videoElement = document.createElement('video');
-        videoElement.src = URL.createObjectURL(file);
-        videoElement.loop = true;
-        videoElement.muted = true;
-        videoElement.playsInline = true;
+async function loadVideoFromPath(videoPath) {
+    setStatus('Loading video...', 'info');
 
+    if (videoElement?.pause) {
+        videoElement.pause();
+        videoElement.src = '';
+    }
+
+    videoElement = document.createElement('video');
+    videoElement.src = videoPath;
+    videoElement.loop = true;
+    videoElement.muted = true;
+    videoElement.playsInline = true;
+
+    try {
         await new Promise((resolve, reject) => {
             videoElement.onloadedmetadata = () => {
                 document.getElementById('video-info').textContent =
@@ -172,9 +223,15 @@ async function loadVideo() {
             };
             videoElement.onerror = () => reject(new Error('Failed to load video'));
         });
-    };
 
-    input.click();
+        // Auto-play if enabled
+        if (autoplayConfig?.autoPlayVideo && isConnected) {
+            setTimeout(() => playVideo(), 500);
+        }
+    } catch (e) {
+        console.error('Video load error:', e);
+        setStatus('Failed to load video', 'error');
+    }
 }
 
 async function playVideo() {
@@ -200,7 +257,6 @@ async function playVideo() {
         setStatus('Playing video', 'success');
         log('Playback started');
 
-        // Kick off first frame
         await pushFrame();
 
     } catch (e) {
@@ -220,10 +276,8 @@ async function stopVideo() {
             videoElement.pause();
             videoElement.currentTime = 0;
         }
-        videoElement = null;
     }
 
-    document.getElementById('playback-controls').style.display = 'none';
     document.getElementById('play-btn').disabled = false;
     document.getElementById('stop-btn').disabled = true;
 

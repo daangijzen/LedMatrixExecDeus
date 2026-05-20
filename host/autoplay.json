@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "autoConnect": true,
+  "autoPlayVideo": true,
+  "defaultVideoPath": "content/default.mp4",
+  "reconnectAttempts": 10,
+  "reconnectDelay": 3000,
+  "portPatterns": [
+    "ttyUSB",
+    "ttyACM",
+    "cu.usbserial",
+    "cu.usbmodem",
+    "COM"
+  ],
+  "prioritizeAdafruit": true,
+  "adafruitIdentifiers": [
+    "Adafruit",
+    "adafruit",
+    "ESP32-S3",
+    "Matrix Portal"
+  ]
+}
