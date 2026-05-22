@@ -43,6 +43,7 @@ function setupEventListeners() {
 
     document.getElementById('test-pattern-btn').addEventListener('click', () => sendCommand('T'));
     document.getElementById('clear-btn').addEventListener('click', () => sendCommand('C'));
+    document.getElementById('reset-btn').addEventListener('click', resetDevice);
 
     document.getElementById('load-video-btn').addEventListener('click', loadVideo);
     document.getElementById('play-btn').addEventListener('click', playVideo);
@@ -287,6 +288,43 @@ async function stopVideo() {
     log('Stopped');
 }
 
+async function resetDevice() {
+    if (!isConnected) {
+        alert('Not connected');
+        return;
+    }
+
+    if (!confirm('Are you sure you want to reset the device? This will restart the ESP32.')) {
+        return;
+    }
+
+    setStatus('Resetting device...', 'info');
+    log('Sending reset command...');
+
+    try {
+        await stopVideo();
+        const r = await window.electronAPI.resetDevice();
+
+        if (r.success) {
+            setStatus('Device is resetting...', 'success');
+            log('Device reset command sent - will reconnect in 3 seconds');
+
+            // UI feedback tijdens reset
+            isConnected = false;
+            updateUI();
+
+            // Na 3 seconden proberen we automatisch te reconnecten
+            setTimeout(() => {
+                setStatus('Reconnecting after reset...', 'info');
+            }, 3000);
+        }
+    } catch (e) {
+        console.error('Reset error:', e);
+        setStatus('Reset failed: ' + e.message, 'error');
+        log('Reset error: ' + e.message);
+    }
+}
+
 async function pushFrame() {
     if (!streamActive || !isPlaying || !videoElement) return;
 
@@ -332,6 +370,7 @@ function updateUI() {
     document.getElementById('disconnect-btn').disabled = !on;
     document.getElementById('test-pattern-btn').disabled = !on;
     document.getElementById('clear-btn').disabled = !on;
+    document.getElementById('reset-btn').disabled = !on;
     document.getElementById('load-video-btn').disabled = !on;
 }
 

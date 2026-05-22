@@ -197,6 +197,13 @@ void handleCommand() {
             receivingFrame = false;
             Serial.println("OK:STOPPED");
             break;
+        case 'R':
+        case 'r':
+                Serial.println("OK:RESETTING");
+                Serial.flush();  // Zorg dat bericht verstuurd wordt
+                delay(100);
+                ESP.restart();  // Software reset
+            break;
     }
 }
 

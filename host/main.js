@@ -514,6 +514,37 @@ ipcMain.handle('disconnect', async () => {
     }
 });
 
+ipcMain.handle('reset-device', async () => {
+    if (!serialPort || !serialPort.isOpen) {
+        throw new Error('Device not connected');
+    }
+
+    try {
+        // Stuur het reset commando direct
+        await writeToPort('R');
+        console.log('✓ Reset command sent');
+
+        // Wacht even en herverbind automatisch
+        setTimeout(async () => {
+            try {
+                if (currentPortPath) {
+                    console.log('🔄 Attempting reconnect after reset...');
+                    await connectToPort(currentPortPath);
+                    console.log('✅ Reconnected after reset');
+                }
+            } catch (err) {
+                console.error('❌ Reconnect after reset failed:', err);
+            }
+        }, 3000);
+
+        return { success: true };
+    } catch (e) {
+        console.error('❌ Reset error:', e.message);
+        throw e;
+    }
+});
+
+
 ipcMain.handle('send-command', async (_e, command) => {
     if (!serialPort?.isOpen) return { success: false, error: 'Not connected' };
     try {

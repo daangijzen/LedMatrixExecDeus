@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     startVideoMode: () => ipcRenderer.invoke('start-video-mode'),
     stopVideoMode: () => ipcRenderer.invoke('stop-video-mode'),
     sendFrame: (frameData) => ipcRenderer.invoke('send-frame', frameData),
+    resetDevice: () => ipcRenderer.invoke('reset-device'),
+
 
     onEsp32Ready: (callback) => ipcRenderer.on('esp32-ready', callback),
     onConnectionLost: (callback) => ipcRenderer.on('connection-lost', callback),
